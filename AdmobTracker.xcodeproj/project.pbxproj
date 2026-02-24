@@ -6,13 +6,31 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		EC6028362F4D746F00950A88 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = EC6028352F4D746F00950A88 /* GoogleSignIn */; };
+		EC6028382F4D746F00950A88 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = EC6028372F4D746F00950A88 /* GoogleSignInSwift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		EC6027FD2F4D6EA800950A88 /* AdmobTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AdmobTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		EC6029002F4D7B4700950A88 /* Exceptions for "AdmobTracker" folder in "AdmobTracker" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = EC6027FC2F4D6EA800950A88 /* AdmobTracker */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		EC6027FF2F4D6EA800950A88 /* AdmobTracker */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				EC6029002F4D7B4700950A88 /* Exceptions for "AdmobTracker" folder in "AdmobTracker" target */,
+			);
 			path = AdmobTracker;
 			sourceTree = "<group>";
 		};
@@ -23,6 +41,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EC6028362F4D746F00950A88 /* GoogleSignIn in Frameworks */,
+				EC6028382F4D746F00950A88 /* GoogleSignInSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +85,8 @@
 			);
 			name = AdmobTracker;
 			packageProductDependencies = (
+				EC6028352F4D746F00950A88 /* GoogleSignIn */,
+				EC6028372F4D746F00950A88 /* GoogleSignInSwift */,
 			);
 			productName = AdmobTracker;
 			productReference = EC6027FD2F4D6EA800950A88 /* AdmobTracker.app */;
@@ -94,6 +116,9 @@
 			);
 			mainGroup = EC6027F42F4D6EA800950A88;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				EC6028342F4D746F00950A88 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EC6027FE2F4D6EA800950A88 /* Products */;
 			projectDirPath = "";
@@ -256,6 +281,7 @@
 				DEVELOPMENT_TEAM = 5C778DVBP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AdmobTracker/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -288,6 +314,7 @@
 				DEVELOPMENT_TEAM = 5C778DVBP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AdmobTracker/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -332,6 +359,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		EC6028342F4D746F00950A88 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		EC6028352F4D746F00950A88 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EC6028342F4D746F00950A88 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		EC6028372F4D746F00950A88 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EC6028342F4D746F00950A88 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = EC6027F52F4D6EA800950A88 /* Project object */;
 }

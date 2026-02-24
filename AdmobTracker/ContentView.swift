@@ -1,24 +1,13 @@
-//
-//  ContentView.swift
-//  AdmobTracker
-//
-//  Created by Maicol Cabreja on 2/24/26.
-//
-
 import SwiftUI
 
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
+        RootView()
     }
 }
 
 #Preview {
     ContentView()
+        .environmentObject(AppState())
+        .environmentObject(AppEnvironment(authManager: AuthManager(), apiClient: MockAdMobAPIClient()))
 }
