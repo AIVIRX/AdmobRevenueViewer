@@ -3,6 +3,8 @@ import Foundation
 protocol AdMobAPIClient {
     func fetchAccounts() async throws -> [AdMobAccount]
     func fetchReport(accountId: String, range: DateRange, timeZone: String?) async throws -> AdMobReport
+    func fetchApps(accountId: String) async throws -> [AdMobApp]
+    func fetchAdUnits(accountId: String) async throws -> [AdMobAdUnit]
 }
 
 final class LiveAdMobAPIClient: AdMobAPIClient {
@@ -46,7 +48,7 @@ final class LiveAdMobAPIClient: AdMobAPIClient {
         let body = ReportRequest(reportSpec: ReportSpec(
             dateRange: ReportDateRange(startDate: range.startDate, endDate: range.endDate),
             dimensions: ["DATE", "APP", "AD_UNIT"],
-            metrics: ["ESTIMATED_EARNINGS", "IMPRESSIONS", "CLICKS"],
+            metrics: ["ESTIMATED_EARNINGS", "IMPRESSIONS", "CLICKS", "AD_REQUESTS", "MATCHED_REQUESTS", "IMPRESSION_RPM"],
             sortConditions: [ReportSortCondition(dimension: "DATE", order: "DESCENDING")],
             timeZone: apiTimeZone
         ))
@@ -63,7 +65,7 @@ final class LiveAdMobAPIClient: AdMobAPIClient {
         let rows: [AdMobReportRow] = lines.compactMap { response in
             guard let row = response.row else { return nil }
             let dateString = row.dimensionValues["DATE"]?.value ?? ""
-            let date = DateParser.date(from: dateString) ?? range.endDate
+            let date = DateParser.date(from: dateString, timeZone: timeZone) ?? range.endDate
 
             let appDimension = row.dimensionValues["APP"]
             let appName = appDimension?.displayLabel ?? appDimension?.value ?? "Unknown App"
@@ -76,12 +78,19 @@ final class LiveAdMobAPIClient: AdMobAPIClient {
             let impressions = row.metricValues["IMPRESSIONS"]?.intValue ?? 0
             let clicks = row.metricValues["CLICKS"]?.intValue ?? 0
             let eCPM = impressions > 0 ? (earnings / Double(impressions) * 1000.0) : 0
+            let adRequests = row.metricValues["AD_REQUESTS"]?.intValue ?? 0
+            let matchedRequests = row.metricValues["MATCHED_REQUESTS"]?.intValue ?? 0
+            let impressionRpmMicros = row.metricValues["IMPRESSION_RPM"]?.microsValue ?? 0
+            let observedECPM = Double(impressionRpmMicros) / 1_000_000.0
 
             let metrics = AdMobMetrics(
                 estimatedEarnings: earnings,
                 impressions: impressions,
                 clicks: clicks,
-                eCPM: eCPM
+                eCPM: eCPM,
+                adRequests: adRequests,
+                matchedRequests: matchedRequests,
+                observedECPM: observedECPM
             )
 
             return AdMobReportRow(
@@ -93,15 +102,57 @@ final class LiveAdMobAPIClient: AdMobAPIClient {
             )
         }
 
-        let totals = rows.reduce(AdMobMetrics(estimatedEarnings: 0, impressions: 0, clicks: 0, eCPM: 0)) { partial, row in
+        let totals = rows.reduce(AdMobMetrics(estimatedEarnings: 0, impressions: 0, clicks: 0, eCPM: 0, adRequests: 0, matchedRequests: 0, observedECPM: 0)) { partial, row in
             let earnings = partial.estimatedEarnings + row.metrics.estimatedEarnings
             let impressions = partial.impressions + row.metrics.impressions
             let clicks = partial.clicks + row.metrics.clicks
             let ecpm = impressions > 0 ? (earnings / Double(impressions) * 1000.0) : 0
-            return AdMobMetrics(estimatedEarnings: earnings, impressions: impressions, clicks: clicks, eCPM: ecpm)
+            let adRequests = partial.adRequests + row.metrics.adRequests
+            let matchedRequests = partial.matchedRequests + row.metrics.matchedRequests
+            let observedECPM = impressions > 0 ? (earnings / Double(impressions) * 1000.0) : 0
+            return AdMobMetrics(
+                estimatedEarnings: earnings,
+                impressions: impressions,
+                clicks: clicks,
+                eCPM: ecpm,
+                adRequests: adRequests,
+                matchedRequests: matchedRequests,
+                observedECPM: observedECPM
+            )
         }
 
         return AdMobReport(startDate: range.startDate, endDate: range.endDate, rows: rows, totals: totals)
+    }
+
+    func fetchApps(accountId: String) async throws -> [AdMobApp] {
+        let url = URL(string: "https://admob.googleapis.com/v1/\(accountId)/apps")!
+        let data = try await request(url: url, method: "GET")
+        let response = try JSONDecoder().decode(ListAppsResponse.self, from: data)
+        return response.apps?.compactMap { app in
+            let displayName = app.linkedAppInfo?.displayName ?? app.manualAppInfo?.displayName
+            guard let displayName else { return nil }
+            return AdMobApp(
+                appId: app.appId ?? app.name ?? "",
+                displayName: displayName,
+                appStoreId: app.linkedAppInfo?.appStoreId,
+                platform: app.platform
+            )
+        } ?? []
+    }
+
+    func fetchAdUnits(accountId: String) async throws -> [AdMobAdUnit] {
+        let url = URL(string: "https://admob.googleapis.com/v1/\(accountId)/adUnits")!
+        let data = try await request(url: url, method: "GET")
+        let response = try JSONDecoder().decode(ListAdUnitsResponse.self, from: data)
+        return response.adUnits?.map {
+            AdMobAdUnit(
+                name: $0.name,
+                adUnitId: $0.adUnitId,
+                appId: $0.appId,
+                displayName: $0.displayName,
+                adFormat: $0.adFormat
+            )
+        } ?? []
     }
 
     private func request(url: URL, method: String) async throws -> Data {
@@ -242,11 +293,17 @@ final class MockAdMobAPIClient: AdMobAPIClient {
             let impressions = 1200 + index * 180
             let clicks = 30 + index * 4
             let eCPM = 4.5 + Double(index) * 0.2
+            let adRequests = 1800 + index * 220
+            let matchedRequests = Int(Double(adRequests) * (0.78 - Double(index) * 0.01))
+            let observedECPM = eCPM
             let metrics = AdMobMetrics(
                 estimatedEarnings: earnings,
                 impressions: impressions,
                 clicks: clicks,
-                eCPM: eCPM
+                eCPM: eCPM,
+                adRequests: adRequests,
+                matchedRequests: matchedRequests,
+                observedECPM: observedECPM
             )
             return AdMobReportRow(
                 id: "row-\(index)",
@@ -257,15 +314,41 @@ final class MockAdMobAPIClient: AdMobAPIClient {
             )
         }
 
-        let totals = rows.reduce(AdMobMetrics(estimatedEarnings: 0, impressions: 0, clicks: 0, eCPM: 0)) { partial, row in
+        let totals = rows.reduce(AdMobMetrics(estimatedEarnings: 0, impressions: 0, clicks: 0, eCPM: 0, adRequests: 0, matchedRequests: 0, observedECPM: 0)) { partial, row in
             let earnings = partial.estimatedEarnings + row.metrics.estimatedEarnings
             let impressions = partial.impressions + row.metrics.impressions
             let clicks = partial.clicks + row.metrics.clicks
             let ecpm = impressions > 0 ? (earnings / Double(impressions) * 1000.0) : 0
-            return AdMobMetrics(estimatedEarnings: earnings, impressions: impressions, clicks: clicks, eCPM: ecpm)
+            let adRequests = partial.adRequests + row.metrics.adRequests
+            let matchedRequests = partial.matchedRequests + row.metrics.matchedRequests
+            let observedECPM = impressions > 0 ? (earnings / Double(impressions) * 1000.0) : 0
+            return AdMobMetrics(
+                estimatedEarnings: earnings,
+                impressions: impressions,
+                clicks: clicks,
+                eCPM: ecpm,
+                adRequests: adRequests,
+                matchedRequests: matchedRequests,
+                observedECPM: observedECPM
+            )
         }
 
         return AdMobReport(startDate: range.startDate, endDate: range.endDate, rows: rows, totals: totals)
+    }
+
+    func fetchApps(accountId: String) async throws -> [AdMobApp] {
+        [
+            AdMobApp(appId: "apps/1", displayName: "Crypto Profit Loss Calculator", appStoreId: "1234567890", platform: "IOS"),
+            AdMobApp(appId: "apps/2", displayName: "Notes Pro", appStoreId: "0987654321", platform: "IOS")
+        ]
+    }
+
+    func fetchAdUnits(accountId: String) async throws -> [AdMobAdUnit] {
+        [
+            AdMobAdUnit(name: "adUnits/1", adUnitId: "ca-app-pub-xxx/111", appId: "apps/1", displayName: "Banner Home", adFormat: "BANNER"),
+            AdMobAdUnit(name: "adUnits/2", adUnitId: "ca-app-pub-xxx/222", appId: "apps/1", displayName: "Interstitial Level", adFormat: "INTERSTITIAL"),
+            AdMobAdUnit(name: "adUnits/3", adUnitId: "ca-app-pub-xxx/333", appId: "apps/2", displayName: "Rewarded Bonus", adFormat: "REWARDED")
+        ]
     }
 }
 
@@ -287,6 +370,47 @@ private struct ListPublisherAccountsResponse: Decodable {
             accounts = []
         }
     }
+}
+
+private struct ListAppsResponse: Decodable {
+    let apps: [AdMobAppResponse]?
+}
+
+private struct AdMobAppResponse: Decodable {
+    let appId: String?
+    let name: String?
+    let platform: String?
+    let linkedAppInfo: LinkedAppInfoResponse?
+    let manualAppInfo: ManualAppInfoResponse?
+
+    private enum CodingKeys: String, CodingKey {
+        case appId
+        case name
+        case platform
+        case linkedAppInfo
+        case manualAppInfo
+    }
+}
+
+private struct LinkedAppInfoResponse: Decodable {
+    let appStoreId: String?
+    let displayName: String?
+}
+
+private struct ManualAppInfoResponse: Decodable {
+    let displayName: String?
+}
+
+private struct ListAdUnitsResponse: Decodable {
+    let adUnits: [AdMobAdUnitResponse]?
+}
+
+private struct AdMobAdUnitResponse: Decodable {
+    let name: String
+    let adUnitId: String
+    let appId: String
+    let displayName: String
+    let adFormat: String
 }
 
 private struct PublisherAccount: Decodable {
@@ -383,11 +507,15 @@ private struct ReportDate: Encodable {
 }
 
 private enum DateParser {
-    static func date(from string: String) -> Date? {
+    static func date(from string: String, timeZone: String?) -> Date? {
         guard string.count == 8 else { return nil }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        if let timeZone, let resolved = TimeZone(identifier: timeZone) {
+            formatter.timeZone = resolved
+        } else {
+            formatter.timeZone = TimeZone.current
+        }
         return formatter.date(from: string)
     }
 }

@@ -4,6 +4,7 @@ import Foundation
 struct AuthUserProfile: Hashable {
     let email: String
     let displayName: String
+    let photoURL: URL?
 }
 
 protocol AuthManaging {
@@ -22,7 +23,8 @@ final class AuthManager: AuthManaging {
         guard let googleUser else { return nil }
         return AuthUserProfile(
             email: googleUser.profile?.email ?? "",
-            displayName: googleUser.profile?.name ?? ""
+            displayName: googleUser.profile?.name ?? "",
+            photoURL: googleUser.profile?.imageURL(withDimension: 200)
         )
     }
 
@@ -33,18 +35,10 @@ final class AuthManager: AuthManaging {
             return
         }
         googleUser = await withCheckedContinuation { continuation in
-            var didResume = false
             GIDSignIn.sharedInstance.restorePreviousSignIn { user, _ in
-                guard !didResume else { return }
-                didResume = true
                 continuation.resume(returning: user)
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                guard !didResume else { return }
-                didResume = true
-                continuation.resume(returning: nil)
-            }
-        }
+        } ?? GIDSignIn.sharedInstance.currentUser
     }
 
     func signIn() async throws -> AuthUserProfile {
@@ -94,7 +88,8 @@ final class AuthManager: AuthManaging {
 
     private func signIn(with presenter: UIViewController) async throws -> GIDGoogleUser {
         let additionalScopes = [
-            "https://www.googleapis.com/auth/admob.readonly"
+            "https://www.googleapis.com/auth/admob.readonly",
+            "https://www.googleapis.com/auth/adsense.readonly"
         ]
 
         return try await withCheckedThrowingContinuation { continuation in

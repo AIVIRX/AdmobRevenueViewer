@@ -2,75 +2,166 @@ import SwiftUI
 
 struct ReportView: View {
     @EnvironmentObject private var appState: AppState
-    @StateObject private var viewModel: ReportViewModel
-
-    init(apiClient: AdMobAPIClient) {
-        _viewModel = StateObject(wrappedValue: ReportViewModel(apiClient: apiClient))
-    }
+    @EnvironmentObject private var environment: AppEnvironment
+    @State private var isLoadingPayments = false
+    @State private var paymentsError: String?
+    @State private var unpaidAmount: String?
+    @State private var lastPaymentAmount: String?
+    @State private var lastPaymentDate: Date?
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        FilterBar(accountName: appState.selectedAccount?.displayName ?? "No account", rangeText: rangeText)
-                        DateRangePills(selection: $appState.dateRangeOption)
-                            .onChange(of: appState.dateRangeOption) { _, newValue in
-                                appState.dateRange = newValue.range()
-                                Task { await loadReportIfNeeded() }
-                            }
+                    HStack(spacing: 16) {
+                        profileImage
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(appState.user?.displayName ?? "Google Account")
+                                .font(.headline)
+                            Text(appState.user?.email ?? "Not signed in")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .listRowInsets(EdgeInsets())
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 8)
                 }
 
-                if viewModel.isLoading {
-                    ProgressView("Loading report...")
-                } else if let error = viewModel.errorMessage {
-                    Text(error)
-                        .foregroundStyle(.red)
-                } else if (viewModel.report?.rows.isEmpty ?? true) {
-                    Text("No data for this date range.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.report?.rows ?? []) { row in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("\(row.appName) - \(row.adUnitName)")
-                                .font(.subheadline)
-                            Text("Earnings: \(formatCurrency(row.metrics.estimatedEarnings)) | Impr: \(formatInt(row.metrics.impressions)) | Clicks: \(formatInt(row.metrics.clicks))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                Section("Actions") {
+                    ShareLink(item: shareMessage) {
+                        LabeledContent("Share App") {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(.tint)
                         }
-                        .padding(.vertical, 6)
+                    }
+
+                    Button(role: .destructive) {
+                        Task {
+                            await environment.authManager.signOut()
+                            appState.user = nil
+                            appState.selectedAccount = nil
+                            appState.prefetchedReport = nil
+                        }
+                    } label: {
+                        LabeledContent("Sign Out") {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                        }
                     }
                 }
+
+                Section("Payments") {
+                    if isLoadingPayments {
+                        HStack {
+                            ProgressView()
+                            Text("Loading payments…")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if let paymentsError {
+                        Text(paymentsError)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        LabeledContent("Unpaid") {
+                            Text(unpaidAmount ?? "--")
+                                .fontWeight(.semibold)
+                        }
+                        LabeledContent("Last Payment") {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(lastPaymentAmount ?? "--")
+                                    .fontWeight(.semibold)
+                                if let lastPaymentDate {
+                                    Text(formatDate(lastPaymentDate))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+
             }
-            .navigationTitle("Reports")
+            .navigationTitle("Account")
+            .listStyle(.insetGrouped)
             .task {
-                await loadReportIfNeeded()
+                await loadPayments()
             }
         }
     }
 
-    private var rangeText: String {
+    private var shareMessage: String {
+        "Check out AdmobTracker — a clean AdMob revenue viewer for iOS."
+    }
+
+    private var profileImage: some View {
+        Group {
+            if let url = appState.user?.photoURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        placeholderImage
+                    case .empty:
+                        ProgressView()
+                    @unknown default:
+                        placeholderImage
+                    }
+                }
+            } else {
+                placeholderImage
+            }
+        }
+        .frame(width: 64, height: 64)
+        .clipShape(Circle())
+        .background(Circle().fill(Color(uiColor: .secondarySystemBackground)))
+        .overlay(Circle().stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1))
+    }
+
+    private var placeholderImage: some View {
+        Image(systemName: "person.crop.circle.fill")
+            .resizable()
+            .scaledToFill()
+            .foregroundStyle(.secondary)
+    }
+
+    @MainActor
+    private func loadPayments() async {
+        guard appState.user != nil else { return }
+        isLoadingPayments = true
+        paymentsError = nil
+        do {
+            let accounts = try await environment.adSenseClient.fetchAccounts()
+            guard let account = accounts.first else {
+                paymentsError = "No AdSense account found."
+                isLoadingPayments = false
+                return
+            }
+            let payments = try await environment.adSenseClient.fetchPayments(accountName: account.name)
+            let unpaid = payments.first { $0.name.hasSuffix("/payments/unpaid") }
+            unpaidAmount = unpaid?.amount
+
+            let datedPayments = payments.compactMap { payment -> (Date, AdSensePayment)? in
+                guard let date = payment.date else { return nil }
+                return (date, payment)
+            }
+            if let latest = datedPayments.sorted(by: { $0.0 > $1.0 }).first {
+                lastPaymentDate = latest.0
+                lastPaymentAmount = latest.1.amount
+            } else {
+                lastPaymentDate = nil
+                lastPaymentAmount = nil
+            }
+        } catch {
+            paymentsError = "Payments unavailable: \(error.localizedDescription)"
+        }
+        isLoadingPayments = false
+    }
+
+    private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
-        return "\(formatter.string(from: appState.dateRange.startDate)) - \(formatter.string(from: appState.dateRange.endDate))"
-    }
-
-    private func loadReportIfNeeded() async {
-        guard let account = appState.selectedAccount else { return }
-        await viewModel.load(accountId: account.id, range: appState.dateRange, timeZone: account.reportingTimeZone)
-    }
-
-    private func formatCurrency(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = appState.selectedAccount?.currencyCode ?? "USD"
-        return formatter.string(from: NSNumber(value: value)) ?? "--"
-    }
-
-    private func formatInt(_ value: Int) -> String {
-        NumberFormatter.localizedString(from: NSNumber(value: value), number: .decimal)
+        return formatter.string(from: date)
     }
 }

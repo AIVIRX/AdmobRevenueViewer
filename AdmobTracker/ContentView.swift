@@ -9,5 +9,9 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .environmentObject(AppState())
-        .environmentObject(AppEnvironment(authManager: AuthManager(), apiClient: MockAdMobAPIClient()))
+        .environmentObject(AppEnvironment(
+            authManager: AuthManager(),
+            apiClient: MockAdMobAPIClient(),
+            adSenseClient: MockAdSenseAPIClient()
+        ))
 }

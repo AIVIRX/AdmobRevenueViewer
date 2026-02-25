@@ -1,10 +1,9 @@
 import SwiftUI
+import GoogleSignIn
 
 @main
 @MainActor
 struct AdmobTrackerApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-
     @StateObject private var appState = AppState()
     @StateObject private var environment = AppEnvironment(authManager: AuthManager())
 
@@ -13,6 +12,9 @@ struct AdmobTrackerApp: App {
             ContentView()
                 .environmentObject(appState)
                 .environmentObject(environment)
+                .onOpenURL { url in
+                    _ = GIDSignIn.sharedInstance.handle(url)
+                }
         }
     }
 }

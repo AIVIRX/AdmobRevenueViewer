@@ -28,6 +28,24 @@ struct AdMobMetrics: Hashable {
     let impressions: Int
     let clicks: Int
     let eCPM: Double
+    let adRequests: Int
+    let matchedRequests: Int
+    let observedECPM: Double
+}
+
+struct AdMobApp: Hashable {
+    let appId: String
+    let displayName: String
+    let appStoreId: String?
+    let platform: String?
+}
+
+struct AdMobAdUnit: Hashable {
+    let name: String
+    let adUnitId: String
+    let appId: String
+    let displayName: String
+    let adFormat: String
 }
 
 struct DateRange: Hashable {

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		EC05527D2F4EB93F00C31D28 /* FluidGradient in Frameworks */ = {isa = PBXBuildFile; productRef = EC05527C2F4EB93F00C31D28 /* FluidGradient */; };
 		EC6028362F4D746F00950A88 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = EC6028352F4D746F00950A88 /* GoogleSignIn */; };
 		EC6028382F4D746F00950A88 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = EC6028372F4D746F00950A88 /* GoogleSignInSwift */; };
 /* End PBXBuildFile section */
@@ -42,6 +43,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				EC6028362F4D746F00950A88 /* GoogleSignIn in Frameworks */,
+				EC05527D2F4EB93F00C31D28 /* FluidGradient in Frameworks */,
 				EC6028382F4D746F00950A88 /* GoogleSignInSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -87,6 +89,7 @@
 			packageProductDependencies = (
 				EC6028352F4D746F00950A88 /* GoogleSignIn */,
 				EC6028372F4D746F00950A88 /* GoogleSignInSwift */,
+				EC05527C2F4EB93F00C31D28 /* FluidGradient */,
 			);
 			productName = AdmobTracker;
 			productReference = EC6027FD2F4D6EA800950A88 /* AdmobTracker.app */;
@@ -118,6 +121,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				EC6028342F4D746F00950A88 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				EC05527B2F4EB93F00C31D28 /* XCRemoteSwiftPackageReference "FluidGradient" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EC6027FE2F4D6EA800950A88 /* Products */;
@@ -361,6 +365,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		EC05527B2F4EB93F00C31D28 /* XCRemoteSwiftPackageReference "FluidGradient" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Cindori/FluidGradient.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
 		EC6028342F4D746F00950A88 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/google/GoogleSignIn-iOS.git";
@@ -372,6 +384,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		EC05527C2F4EB93F00C31D28 /* FluidGradient */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EC05527B2F4EB93F00C31D28 /* XCRemoteSwiftPackageReference "FluidGradient" */;
+			productName = FluidGradient;
+		};
 		EC6028352F4D746F00950A88 /* GoogleSignIn */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = EC6028342F4D746F00950A88 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
