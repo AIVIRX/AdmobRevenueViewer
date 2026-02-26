@@ -3,11 +3,16 @@ import SwiftUI
 struct ReportView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var environment: AppEnvironment
+    @StateObject private var accountsViewModel: AccountsViewModel
     @State private var isLoadingPayments = false
     @State private var paymentsError: String?
     @State private var unpaidAmount: String?
     @State private var lastPaymentAmount: String?
     @State private var lastPaymentDate: Date?
+
+    init(apiClient: AdMobAPIClient) {
+        _accountsViewModel = StateObject(wrappedValue: AccountsViewModel(apiClient: apiClient))
+    }
 
     var body: some View {
         NavigationStack {
@@ -26,25 +31,36 @@ struct ReportView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 8)
                 }
-
-                Section("Actions") {
-                    ShareLink(item: shareMessage) {
-                        LabeledContent("Share App") {
-                            Image(systemName: "square.and.arrow.up")
-                                .foregroundStyle(.tint)
-                        }
-                    }
-
-                    Button(role: .destructive) {
-                        Task {
-                            await environment.authManager.signOut()
-                            appState.user = nil
-                            appState.selectedAccount = nil
-                            appState.prefetchedReport = nil
-                        }
-                    } label: {
-                        LabeledContent("Sign Out") {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                
+                Section("Accounts") {
+                    if accountsViewModel.isLoading {
+                        ProgressView("Loading accounts...")
+                    } else if let error = accountsViewModel.errorMessage {
+                        Text(error)
+                            .foregroundStyle(.red)
+                    } else if accountsViewModel.accounts.isEmpty {
+                        Text("No AdMob accounts found for this Google user.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(accountsViewModel.accounts) { account in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(account.displayName)
+                                        .font(.headline)
+                                    Text(account.id)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if account == appState.selectedAccount {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                appState.selectedAccount = account
+                            }
                         }
                     }
                 }
@@ -78,11 +94,44 @@ struct ReportView: View {
                         }
                     }
                 }
+                
+                Section("Actions") {
+                    ShareLink(item: shareMessage) {
+                        LabeledContent("Share App") {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(.tint)
+                        }
+                    }
+
+                    Button(role: .destructive) {
+                        Task {
+                            await environment.authManager.signOut()
+                            appState.user = nil
+                            appState.selectedAccount = nil
+                            appState.prefetchedReport = nil
+                        }
+                    } label: {
+                        LabeledContent("Sign Out") {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+
 
             }
             .navigationTitle("Account")
             .listStyle(.insetGrouped)
-            .task {
+            .refreshable {
+                await loadPayments()
+                await accountsViewModel.load()
+            }
+            .task(id: appState.selectedAccount?.id) {
+                await accountsViewModel.load()
+                if appState.selectedAccount == nil {
+                    appState.selectedAccount = accountsViewModel.accounts.first
+                    return
+                }
                 await loadPayments()
             }
         }

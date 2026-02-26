@@ -3,6 +3,7 @@ import Foundation
 protocol AdMobAPIClient {
     func fetchAccounts() async throws -> [AdMobAccount]
     func fetchReport(accountId: String, range: DateRange, timeZone: String?) async throws -> AdMobReport
+    func fetchCountryReport(accountId: String, range: DateRange, timeZone: String?) async throws -> [AdMobCountrySummary]
     func fetchApps(accountId: String) async throws -> [AdMobApp]
     func fetchAdUnits(accountId: String) async throws -> [AdMobAdUnit]
 }
@@ -122,6 +123,52 @@ final class LiveAdMobAPIClient: AdMobAPIClient {
         }
 
         return AdMobReport(startDate: range.startDate, endDate: range.endDate, rows: rows, totals: totals)
+    }
+
+    func fetchCountryReport(accountId: String, range: DateRange, timeZone: String?) async throws -> [AdMobCountrySummary] {
+        let url = URL(string: "https://admob.googleapis.com/v1/\(accountId)/networkReport:generate")!
+        let apiTimeZone = (timeZone == "America/Los_Angeles") ? timeZone : nil
+        let body = ReportRequest(reportSpec: ReportSpec(
+            dateRange: ReportDateRange(startDate: range.startDate, endDate: range.endDate),
+            dimensions: ["COUNTRY"],
+            metrics: ["ESTIMATED_EARNINGS", "IMPRESSIONS", "CLICKS", "AD_REQUESTS", "MATCHED_REQUESTS", "IMPRESSION_RPM"],
+            sortConditions: [ReportSortCondition(dimension: "COUNTRY", order: "ASCENDING")],
+            timeZone: apiTimeZone
+        ))
+
+        let data = try await request(url: url, method: "POST", body: body)
+        let lines: [GenerateNetworkReportResponse]
+        do {
+            lines = try parseReportStream(data: data)
+        } catch {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw AdMobAPIError.decodingFailed(body: body, underlying: error)
+        }
+
+        let rows: [AdMobCountrySummary] = lines.compactMap { response in
+            guard let row = response.row else { return nil }
+            let countryDimension = row.dimensionValues["COUNTRY"]
+            let countryName = countryDimension?.displayLabel ?? countryDimension?.value ?? "Unknown"
+            let countryCode = countryDimension?.value
+
+            let earningsMicros = row.metricValues["ESTIMATED_EARNINGS"]?.microsValue ?? 0
+            let earnings = Double(earningsMicros) / 1_000_000.0
+            let impressions = row.metricValues["IMPRESSIONS"]?.intValue ?? 0
+            let clicks = row.metricValues["CLICKS"]?.intValue ?? 0
+            let eCPM = impressions > 0 ? (earnings / Double(impressions) * 1000.0) : 0
+
+            return AdMobCountrySummary(
+                id: countryCode ?? countryName,
+                name: countryName,
+                code: countryCode,
+                earnings: earnings,
+                impressions: impressions,
+                clicks: clicks,
+                eCPM: eCPM
+            )
+        }
+
+        return rows
     }
 
     func fetchApps(accountId: String) async throws -> [AdMobApp] {
@@ -336,10 +383,21 @@ final class MockAdMobAPIClient: AdMobAPIClient {
         return AdMobReport(startDate: range.startDate, endDate: range.endDate, rows: rows, totals: totals)
     }
 
+    func fetchCountryReport(accountId: String, range: DateRange, timeZone: String?) async throws -> [AdMobCountrySummary] {
+        [
+            AdMobCountrySummary(id: "US", name: "United States", code: "US", earnings: 42.15, impressions: 18250, clicks: 520, eCPM: 2.31),
+            AdMobCountrySummary(id: "GB", name: "United Kingdom", code: "GB", earnings: 18.7, impressions: 7400, clicks: 210, eCPM: 2.53),
+            AdMobCountrySummary(id: "CA", name: "Canada", code: "CA", earnings: 11.9, impressions: 5100, clicks: 140, eCPM: 2.33),
+            AdMobCountrySummary(id: "DE", name: "Germany", code: "DE", earnings: 9.4, impressions: 4200, clicks: 118, eCPM: 2.24),
+            AdMobCountrySummary(id: "AU", name: "Australia", code: "AU", earnings: 7.8, impressions: 3100, clicks: 86, eCPM: 2.52)
+        ]
+    }
+
     func fetchApps(accountId: String) async throws -> [AdMobApp] {
         [
             AdMobApp(appId: "apps/1", displayName: "Crypto Profit Loss Calculator", appStoreId: "1234567890", platform: "IOS"),
-            AdMobApp(appId: "apps/2", displayName: "Notes Pro", appStoreId: "0987654321", platform: "IOS")
+            AdMobApp(appId: "apps/2", displayName: "Notes Pro", appStoreId: "0987654321", platform: "IOS"),
+            AdMobApp(appId: "apps/3", displayName: "Focus Timer", appStoreId: "com.focustimer.app", platform: "ANDROID")
         ]
     }
 

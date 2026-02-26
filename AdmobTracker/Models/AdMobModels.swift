@@ -33,6 +33,16 @@ struct AdMobMetrics: Hashable {
     let observedECPM: Double
 }
 
+struct AdMobCountrySummary: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let code: String?
+    let earnings: Double
+    let impressions: Int
+    let clicks: Int
+    let eCPM: Double
+}
+
 struct AdMobApp: Hashable {
     let appId: String
     let displayName: String

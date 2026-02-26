@@ -16,11 +16,11 @@ struct RootView: View {
                         .tabItem {
                             Label("Overview", systemImage: "chart.bar.xaxis")
                         }
-                    AccountsView(apiClient: environment.apiClient)
+                    InsightsView(apiClient: environment.apiClient)
                         .tabItem {
-                            Label("Accounts", systemImage: "person.2")
+                            Label("Insights", systemImage: "lightbulb")
                         }
-                    ReportView()
+                    ReportView(apiClient: environment.apiClient)
                         .tabItem {
                             Label("Account", systemImage: "person.circle")
                         }

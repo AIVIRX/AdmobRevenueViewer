@@ -5,7 +5,7 @@ struct DateRangePills: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
+            HStack(spacing: 5) {
                 ForEach(DateRangeOption.allCases) { option in
                     Button {
                         selection = option

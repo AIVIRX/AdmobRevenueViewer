@@ -1,6 +1,8 @@
 import SwiftUI
 import Charts
 
+private let summaryAnimation = Animation.easeInOut(duration: 0.25)
+
 struct DashboardView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var environment: AppEnvironment
@@ -25,35 +27,31 @@ struct DashboardView: View {
                         }
                     heroCard
                     metricsGrid
-                    if shouldShowChart {
-                        chartSection
-                    }
                     SectionHeader(title: "Apps", subtitle: "Performance by app")
                     metricPills
                     appsList
                     if appSummaries.count > 5 {
-                        Button(showAllApps ? "Show Less" : "Show More") {
+                        ShowMoreRowButton(title: showAllApps ? "Show Less" : "Show More") {
                             withAnimation(.easeInOut) {
                                 showAllApps.toggle()
                             }
                         }
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     SectionHeader(title: "Ad Units", subtitle: "Performance by ad unit")
                     adUnitMetricPills
                     adUnitsList
                     if adUnitSummaries.count > 5 {
-                        Button(showAllAdUnits ? "Show Less" : "Show More") {
+                        ShowMoreRowButton(title: showAllAdUnits ? "Show Less" : "Show More") {
                             withAnimation(.easeInOut) {
                                 showAllAdUnits.toggle()
                             }
                         }
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .padding(16)
+            }
+            .refreshable {
+                await loadReportIfNeeded()
             }
             .navigationTitle("Overview")
             .navigationBarTitleDisplayMode(.inline)
@@ -73,55 +71,72 @@ struct DashboardView: View {
 
     private var heroCard: some View {
         let totals = viewModel.report?.totals
+        let heroValue = formatCurrency(totals?.estimatedEarnings)
         return ZStack(alignment: .bottomLeading) {
             RoundedRectangle(cornerRadius: 24)
-                .fill(
-                    LinearGradient(
-                        colors: [Color(red: 0.18, green: 0.63, blue: 0.60), Color(red: 0.12, green: 0.36, blue: 0.80)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(Color(uiColor: .secondarySystemBackground))
                 .overlay(
-                    Circle()
-                        .fill(Color.white.opacity(0.12))
-                        .frame(width: 180, height: 180)
-                        .offset(x: 120, y: -90)
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1)
                 )
+                .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 6)
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("Estimated earnings")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                Text(formatCurrency(totals?.estimatedEarnings))
+                HStack{
+                    Text("Estimated earnings")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    
+                    Spacer()
+                
+                    Text(appState.dateRangeOption.rawValue)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(heroValue)
                     .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
+                    .contentTransition(.numericText())
+                    .animation(summaryAnimation, value: heroValue)
                 HStack(spacing: 6) {
                     if let delta = percentChange(current: totals?.estimatedEarnings, previous: viewModel.previousReport?.totals.estimatedEarnings) {
                         Image(systemName: delta >= 0 ? "arrow.up.right" : "arrow.down.right")
                         Text(formatDelta(delta))
+                            .contentTransition(.numericText())
+                            .animation(summaryAnimation, value: formatDelta(delta))
                         Text(comparisonLabel)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.secondary)
                     } else {
                         Image(systemName: "arrow.up.right")
                             .opacity(0)
                         Text("--")
                             .opacity(0)
                         Text(comparisonLabel)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.secondary)
                             .opacity(0)
                     }
                 }
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(heroDeltaColor)
-                Text(appState.dateRangeOption.rawValue)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.8))
+                if shouldShowChart {
+                    if viewModel.isLoading {
+                        ProgressView("Loading chart...")
+                    } else if let data = chartData, !data.isEmpty {
+                        EarningsChartView(
+                            data: data,
+                            domain: chartDomain,
+                            currencyCode: appState.selectedAccount?.currencyCode ?? "USD",
+                            isCompact: true
+                        )
+                    } else {
+                        Text("No chart data available.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(20)
         }
-        .frame(height: 160)
-        .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 8)
     }
 
     private var metricsGrid: some View {
@@ -190,14 +205,13 @@ struct DashboardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 5) {
                         ForEach(AppMetric.allCases, id: \.self) { metric in
                             AppFilterPill(title: metric.title, isSelected: selectedMetric == metric) {
                                 selectedMetric = metric
                             }
                         }
                     }
-                    .padding(.vertical, 4)
                 }
             }
         }
@@ -220,14 +234,13 @@ struct DashboardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 5) {
                         ForEach(AppMetric.allCases, id: \.self) { metric in
                             AppFilterPill(title: metric.title, isSelected: selectedAdUnitMetric == metric) {
                                 selectedAdUnitMetric = metric
                             }
                         }
                     }
-                    .padding(.vertical, 4)
                 }
             }
         }
@@ -242,7 +255,7 @@ struct DashboardView: View {
             } else if appSummaries.isEmpty {
                 EmptyView()
             } else {
-                VStack(spacing: 12) {
+                VStack(spacing: 5) {
                     ForEach(visibleAppSummaries) { summary in
                         AppRowCard(
                             name: summary.appName,
@@ -266,7 +279,7 @@ struct DashboardView: View {
             } else if adUnitSummaries.isEmpty {
                 EmptyView()
             } else {
-                VStack(spacing: 12) {
+                VStack(spacing: 5) {
                     ForEach(visibleAdUnitSummaries) { summary in
                         AdUnitRowCard(
                             name: summary.adUnitName,
@@ -288,7 +301,8 @@ struct DashboardView: View {
                 EarningsChartView(
                     data: data,
                     domain: chartDomain,
-                    currencyCode: appState.selectedAccount?.currencyCode ?? "USD"
+                    currencyCode: appState.selectedAccount?.currencyCode ?? "USD",
+                    isCompact: false
                 )
             } else if viewModel.isLoading {
                 ProgressView("Loading chart...")
@@ -353,10 +367,15 @@ struct DashboardView: View {
            prefetched.accountId == account.id,
            prefetched.range == range,
            prefetched.timeZone == account.reportingTimeZone {
-            viewModel.report = prefetched.report
+            viewModel.isLoading = true
             viewModel.errorMessage = nil
+            await viewModel.loadPreviousReport(
+                accountId: account.id,
+                range: compareRange,
+                timeZone: account.reportingTimeZone
+            )
+            viewModel.report = prefetched.report
             viewModel.isLoading = false
-            viewModel.previousReport = nil
             Task { await viewModel.loadAppMetadata(accountId: account.id) }
             Task { await viewModel.loadAdUnitMetadata(accountId: account.id) }
             return
@@ -539,7 +558,7 @@ struct DashboardView: View {
     private var heroDeltaColor: Color {
         guard let delta = percentChange(current: viewModel.report?.totals.estimatedEarnings,
                                         previous: viewModel.previousReport?.totals.estimatedEarnings) else {
-            return Color.white.opacity(0.85)
+            return Color.secondary
         }
         return delta >= 0 ? Color.green.opacity(0.95) : Color.red.opacity(0.95)
     }
@@ -574,6 +593,7 @@ private struct EarningsChartView: View {
     let data: [ChartPoint]
     let domain: ClosedRange<Date>
     let currencyCode: String
+    let isCompact: Bool
 
     @State private var selectedPoint: ChartPoint?
 
@@ -630,11 +650,15 @@ private struct EarningsChartView: View {
         .chartXScale(domain: domain)
         .chartXAxis(.hidden)
         .chartYScale(domain: 0...max(1, data.map { $0.earnings }.max() ?? 1))
-        .frame(height: 200)
-        .padding(12)
+        .frame(height: isCompact ? 120 : 200)
+        .padding(isCompact ? 0 : 12)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(uiColor: .secondarySystemBackground))
+            Group {
+                if !isCompact {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(uiColor: .secondarySystemBackground))
+                }
+            }
         )
         .chartOverlay { proxy in
             GeometryReader { geometry in
@@ -710,6 +734,9 @@ private struct MetricTile: View {
     let deltaLabel: String
 
     var body: some View {
+        let deltaValue = delta.map(formatDelta) ?? "--"
+        let hasDelta = delta != nil
+        let deltaColor = hasDelta ? ((delta ?? 0) >= 0 ? Color.green : Color.red) : Color.secondary
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: systemImage)
@@ -721,19 +748,24 @@ private struct MetricTile: View {
             }
             Text(value)
                 .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .contentTransition(.numericText())
+                .animation(summaryAnimation, value: value)
             Text(subtitle)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            if let delta {
-                HStack(spacing: 6) {
-                    Image(systemName: delta >= 0 ? "arrow.up.right" : "arrow.down.right")
-                    Text(formatDelta(delta))
-                    Text(deltaLabel)
-                        .foregroundStyle(.secondary)
-                }
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(delta >= 0 ? Color.green : Color.red)
+            HStack(spacing: 6) {
+                Image(systemName: (delta ?? 0) >= 0 ? "arrow.up.right" : "arrow.down.right")
+                    .opacity(hasDelta ? 1 : 0)
+                Text(deltaValue)
+                    .monospacedDigit()
+                    .frame(width: 56, alignment: .leading)
+                    .contentTransition(.numericText())
+                    .animation(summaryAnimation, value: deltaValue)
+                Text(deltaLabel)
+                    .foregroundStyle(.secondary)
             }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(deltaColor)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -741,6 +773,10 @@ private struct MetricTile: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color(uiColor: .secondarySystemBackground))
                 .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 3)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1)
+                )
         )
     }
 
@@ -799,6 +835,29 @@ private struct AppFilterPill: View {
     }
 }
 
+private struct ShowMoreRowButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Spacer(minLength: 0)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct AppRowCard: View {
     let name: String
     let metricLabel: String
@@ -823,6 +882,8 @@ private struct AppRowCard: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Text(metricValue)
                     .font(.subheadline.weight(.semibold))
+                    .contentTransition(.numericText())
+                    .animation(summaryAnimation, value: metricValue)
                 Text(metricLabel)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -833,6 +894,10 @@ private struct AppRowCard: View {
         .background(
             RoundedRectangle(cornerRadius: 14)
                 .fill(Color(uiColor: .secondarySystemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1)
+                )
         )
     }
 
@@ -868,6 +933,8 @@ private struct AdUnitRowCard: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Text(metricValue)
                     .font(.subheadline.weight(.semibold))
+                    .contentTransition(.numericText())
+                    .animation(summaryAnimation, value: metricValue)
                 Text(metricLabel)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -878,6 +945,10 @@ private struct AdUnitRowCard: View {
         .background(
             RoundedRectangle(cornerRadius: 14)
                 .fill(Color(uiColor: .secondarySystemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1)
+                )
         )
     }
 }
@@ -888,16 +959,42 @@ private struct AdUnitIconView: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color.accentColor.opacity(0.18))
-            Image(systemName: iconName)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
+                .fill(Color(uiColor: .secondarySystemBackground))
+            if let assetName {
+                Image(assetName)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(8)
+            } else {
+                Image(systemName: iconName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
         }
         .frame(width: 44, height: 44)
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1)
         )
+    }
+
+    private var assetName: String? {
+        switch adFormat?.uppercased() {
+        case "BANNER":
+            return "banner"
+        case "INTERSTITIAL":
+            return "interstitial"
+        case "REWARDED":
+            return "rewarded"
+        case "REWARDED_INTERSTITIAL":
+            return "rewardedinterstitial"
+        case "NATIVE":
+            return "nativeAdvanced"
+        case "APP_OPEN":
+            return "appopen"
+        default:
+            return nil
+        }
     }
 
     private var iconName: String {

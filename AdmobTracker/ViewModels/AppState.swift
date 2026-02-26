@@ -9,9 +9,9 @@ final class AppState: ObservableObject {
     @Published var dateRangeOption: DateRangeOption
     @Published var prefetchedReport: PrefetchedReport?
 
-    init(dateRange: DateRange? = nil, dateRangeOption: DateRangeOption = .last7Days) {
+    init(dateRange: DateRange? = nil, dateRangeOption: DateRangeOption = .today) {
         self.dateRangeOption = dateRangeOption
-        self.dateRange = dateRange ?? .lastNDays(7)
+        self.dateRange = dateRange ?? .lastNDays(1)
     }
 
     var isSignedIn: Bool {

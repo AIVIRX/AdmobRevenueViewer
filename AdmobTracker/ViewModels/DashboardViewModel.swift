@@ -14,18 +14,19 @@ final class DashboardViewModel: ObservableObject {
 
     private let apiClient: AdMobAPIClient
     private let appStoreClient: AppStoreLookupClient
+    private let playStoreClient: PlayStoreLookupClient
     private var loadedAppMetadataAccountId: String?
     private var loadedAdUnitMetadataAccountId: String?
 
-    init(apiClient: AdMobAPIClient, appStoreClient: AppStoreLookupClient? = nil) {
+    init(apiClient: AdMobAPIClient, appStoreClient: AppStoreLookupClient? = nil, playStoreClient: PlayStoreLookupClient? = nil) {
         self.apiClient = apiClient
         self.appStoreClient = appStoreClient ?? LiveAppStoreLookupClient()
+        self.playStoreClient = playStoreClient ?? LivePlayStoreLookupClient()
     }
 
     func load(accountId: String, range: DateRange, compareRange: DateRange, timeZone: String?) async {
         isLoading = true
         errorMessage = nil
-        previousReport = nil
         do {
             async let currentTask = apiClient.fetchReport(accountId: accountId, range: range, timeZone: timeZone)
             async let previousTask = apiClient.fetchReport(accountId: accountId, range: compareRange, timeZone: timeZone)
@@ -33,12 +34,20 @@ final class DashboardViewModel: ObservableObject {
             do {
                 previousReport = try await previousTask
             } catch {
-                previousReport = nil
+                // Keep prior comparison data if the refresh comparison fails.
             }
         } catch {
             errorMessage = "Unable to load report: \(error.localizedDescription)"
         }
         isLoading = false
+    }
+
+    func loadPreviousReport(accountId: String, range: DateRange, timeZone: String?) async {
+        do {
+            previousReport = try await apiClient.fetchReport(accountId: accountId, range: range, timeZone: timeZone)
+        } catch {
+            // Keep prior comparison data if the refresh comparison fails.
+        }
     }
 
     func loadAppMetadata(accountId: String) async {
@@ -59,7 +68,12 @@ final class DashboardViewModel: ObservableObject {
                 for app in apps {
                     guard let appStoreId = app.appStoreId else { continue }
                     let name = app.displayName
+                    let platform = app.platform?.uppercased()
                     group.addTask {
+                        if platform == "ANDROID" {
+                            let url = try await self.playStoreClient.fetchIconURL(packageName: appStoreId)
+                            return (name, url)
+                        }
                         let url = try await self.appStoreClient.fetchIconURL(appStoreId: appStoreId)
                         return (name, url)
                     }

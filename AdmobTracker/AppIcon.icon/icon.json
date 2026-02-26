@@ -1,0 +1,43 @@
+{
+  "fill" : {
+    "solid" : "extended-gray:1.00000,1.00000"
+  },
+  "groups" : [
+    {
+      "blur-material" : 0.5,
+      "layers" : [
+        {
+          "glass" : true,
+          "image-name" : "nm_3.png",
+          "name" : "nm_3"
+        },
+        {
+          "glass" : true,
+          "image-name" : "nm_2.png",
+          "name" : "nm_2"
+        },
+        {
+          "glass" : true,
+          "image-name" : "nm.png",
+          "name" : "nm"
+        }
+      ],
+      "lighting" : "individual",
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.5
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.2
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
