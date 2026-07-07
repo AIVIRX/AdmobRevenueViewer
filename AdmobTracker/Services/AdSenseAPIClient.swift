@@ -72,6 +72,33 @@ enum AdSenseAPIError: LocalizedError {
             return "HTTP \(statusCode): \(body)"
         }
     }
+
+    var userMessage: String? {
+        switch self {
+        case let .httpError(statusCode, body):
+            let normalizedBody = body.lowercased()
+            let unauthenticated = normalizedBody.contains("unauthenticated")
+                || normalizedBody.contains("could not be authenticated")
+                || normalizedBody.contains("account could not be authenticated")
+            if statusCode == 401, unauthenticated {
+                return "This Google account doesn't have AdSense access."
+            }
+            if statusCode == 400, normalizedBody.contains("disapproved") {
+                return "This AdSense account is disapproved."
+            }
+            if statusCode == 403 {
+                return "This Google account doesn't have permission to access AdSense data."
+            }
+            return nil
+        }
+    }
+
+    static func isUnauthenticated(statusCode: Int, body: String) -> Bool {
+        guard statusCode == 401 else { return false }
+        return body.contains("unauthenticated")
+            || body.contains("could not be authenticated")
+            || body.contains("account could not be authenticated")
+    }
 }
 
 private struct AdSenseAccountsResponse: Decodable {

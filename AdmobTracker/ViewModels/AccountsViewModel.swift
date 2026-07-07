@@ -19,7 +19,14 @@ final class AccountsViewModel: ObservableObject {
         do {
             accounts = try await apiClient.fetchAccounts()
         } catch {
-            errorMessage = "Unable to load accounts: \(error.localizedDescription)"
+            if let apiError = error as? AdMobAPIError,
+               case let .httpError(statusCode, body) = apiError,
+               AdMobAPIError.isUnauthenticatedPublisher(statusCode: statusCode, body: body.lowercased()) {
+                accounts = []
+                errorMessage = nil
+            } else {
+                errorMessage = "Unable to load accounts: \(ErrorMessageFormatter.message(for: error))"
+            }
         }
         isLoading = false
     }

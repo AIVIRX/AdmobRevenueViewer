@@ -6,6 +6,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var report: AdMobReport?
     @Published var previousReport: AdMobReport?
+    @Published var countrySummaries: [AdMobCountrySummary] = []
     @Published var errorMessage: String?
     @Published var appIconURLs: [String: URL] = [:]
     @Published var appPlatforms: [String: String] = [:]
@@ -30,14 +31,24 @@ final class DashboardViewModel: ObservableObject {
         do {
             async let currentTask = apiClient.fetchReport(accountId: accountId, range: range, timeZone: timeZone)
             async let previousTask = apiClient.fetchReport(accountId: accountId, range: compareRange, timeZone: timeZone)
+            async let countryTask = apiClient.fetchCountryReport(accountId: accountId, range: range, timeZone: timeZone)
             report = try await currentTask
             do {
                 previousReport = try await previousTask
             } catch {
                 // Keep prior comparison data if the refresh comparison fails.
             }
+            do {
+                countrySummaries = try await countryTask
+            } catch {
+                // Keep prior country data if the country report fails.
+            }
+        } catch is CancellationError {
+            // Ignore cancellation errors from refresh/task invalidation.
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // Ignore URL cancellation errors surfaced as URLError.
         } catch {
-            errorMessage = "Unable to load report: \(error.localizedDescription)"
+            errorMessage = "Unable to load report: \(ErrorMessageFormatter.message(for: error))"
         }
         isLoading = false
     }
@@ -50,8 +61,16 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    func loadAppMetadata(accountId: String) async {
-        if loadedAppMetadataAccountId == accountId, !appIconURLs.isEmpty {
+    func fetchWidgetTrendReport(accountId: String, range: DateRange, timeZone: String?) async -> AdMobReport? {
+        do {
+            return try await apiClient.fetchReport(accountId: accountId, range: range, timeZone: timeZone)
+        } catch {
+            return nil
+        }
+    }
+
+    func loadAppMetadata(accountId: String, force: Bool = false) async {
+        if !force, loadedAppMetadataAccountId == accountId, !appIconURLs.isEmpty {
             return
         }
         do {
@@ -96,8 +115,8 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    func loadAdUnitMetadata(accountId: String) async {
-        if loadedAdUnitMetadataAccountId == accountId, !adUnitFormats.isEmpty {
+    func loadAdUnitMetadata(accountId: String, force: Bool = false) async {
+        if !force, loadedAdUnitMetadataAccountId == accountId, !adUnitFormats.isEmpty {
             return
         }
         do {

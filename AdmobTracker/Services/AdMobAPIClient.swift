@@ -4,6 +4,7 @@ protocol AdMobAPIClient {
     func fetchAccounts() async throws -> [AdMobAccount]
     func fetchReport(accountId: String, range: DateRange, timeZone: String?) async throws -> AdMobReport
     func fetchCountryReport(accountId: String, range: DateRange, timeZone: String?) async throws -> [AdMobCountrySummary]
+    func fetchMonthlyEarnings(accountId: String, range: DateRange, timeZone: String?) async throws -> [AdMobMonthlyEarning]
     func fetchApps(accountId: String) async throws -> [AdMobApp]
     func fetchAdUnits(accountId: String) async throws -> [AdMobAdUnit]
 }
@@ -131,44 +132,53 @@ final class LiveAdMobAPIClient: AdMobAPIClient {
         let body = ReportRequest(reportSpec: ReportSpec(
             dateRange: ReportDateRange(startDate: range.startDate, endDate: range.endDate),
             dimensions: ["COUNTRY"],
-            metrics: ["ESTIMATED_EARNINGS", "IMPRESSIONS", "CLICKS", "AD_REQUESTS", "MATCHED_REQUESTS", "IMPRESSION_RPM"],
+            metrics: ["ESTIMATED_EARNINGS", "IMPRESSIONS", "CLICKS", "AD_REQUESTS", "MATCHED_REQUESTS"],
             sortConditions: [ReportSortCondition(dimension: "COUNTRY", order: "ASCENDING")],
             timeZone: apiTimeZone
         ))
-
         let data = try await request(url: url, method: "POST", body: body)
-        let lines: [GenerateNetworkReportResponse]
-        do {
-            lines = try parseReportStream(data: data)
-        } catch {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw AdMobAPIError.decodingFailed(body: body, underlying: error)
-        }
-
-        let rows: [AdMobCountrySummary] = lines.compactMap { response in
+        let lines = try parseReportStream(data: data)
+        return lines.compactMap { response in
             guard let row = response.row else { return nil }
-            let countryDimension = row.dimensionValues["COUNTRY"]
-            let countryName = countryDimension?.displayLabel ?? countryDimension?.value ?? "Unknown"
-            let countryCode = countryDimension?.value
-
-            let earningsMicros = row.metricValues["ESTIMATED_EARNINGS"]?.microsValue ?? 0
-            let earnings = Double(earningsMicros) / 1_000_000.0
+            let country = row.dimensionValues["COUNTRY"]
+            let name = country?.displayLabel ?? country?.value ?? "Unknown"
+            let code = country?.value
+            let micros = row.metricValues["ESTIMATED_EARNINGS"]?.microsValue ?? 0
+            let earnings = Double(micros) / 1_000_000
             let impressions = row.metricValues["IMPRESSIONS"]?.intValue ?? 0
-            let clicks = row.metricValues["CLICKS"]?.intValue ?? 0
-            let eCPM = impressions > 0 ? (earnings / Double(impressions) * 1000.0) : 0
-
             return AdMobCountrySummary(
-                id: countryCode ?? countryName,
-                name: countryName,
-                code: countryCode,
+                id: code ?? name,
+                name: name,
+                code: code,
                 earnings: earnings,
                 impressions: impressions,
-                clicks: clicks,
-                eCPM: eCPM
+                clicks: row.metricValues["CLICKS"]?.intValue ?? 0,
+                adRequests: row.metricValues["AD_REQUESTS"]?.intValue ?? 0,
+                matchedRequests: row.metricValues["MATCHED_REQUESTS"]?.intValue ?? 0,
+                eCPM: impressions > 0 ? earnings / Double(impressions) * 1_000 : 0
             )
         }
+    }
 
-        return rows
+    func fetchMonthlyEarnings(accountId: String, range: DateRange, timeZone: String?) async throws -> [AdMobMonthlyEarning] {
+        let url = URL(string: "https://admob.googleapis.com/v1/\(accountId)/networkReport:generate")!
+        let apiTimeZone = (timeZone == "America/Los_Angeles") ? timeZone : nil
+        let body = ReportRequest(reportSpec: ReportSpec(
+            dateRange: ReportDateRange(startDate: range.startDate, endDate: range.endDate),
+            dimensions: ["MONTH"],
+            metrics: ["ESTIMATED_EARNINGS"],
+            sortConditions: [ReportSortCondition(dimension: "MONTH", order: "ASCENDING")],
+            timeZone: apiTimeZone
+        ))
+        let data = try await request(url: url, method: "POST", body: body)
+        let lines = try parseReportStream(data: data)
+        return lines.compactMap { response in
+            guard let row = response.row,
+                  let monthValue = row.dimensionValues["MONTH"]?.value,
+                  let month = DateParser.month(from: monthValue, timeZone: timeZone) else { return nil }
+            let micros = row.metricValues["ESTIMATED_EARNINGS"]?.microsValue ?? 0
+            return AdMobMonthlyEarning(month: month, estimatedEarnings: Double(micros) / 1_000_000)
+        }
     }
 
     func fetchApps(accountId: String) async throws -> [AdMobApp] {
@@ -320,6 +330,30 @@ enum AdMobAPIError: LocalizedError {
             return "Unable to parse AdMob API response. Raw: \(body)"
         }
     }
+
+    var userMessage: String? {
+        switch self {
+        case let .httpError(statusCode, body):
+            let normalizedBody = body.lowercased()
+            let unauthenticated = Self.isUnauthenticatedPublisher(statusCode: statusCode, body: normalizedBody)
+            if unauthenticated {
+                return "This Google account doesn't have AdMob access. Sign in with an AdMob-enabled account or create an AdMob account."
+            }
+            if statusCode == 403 {
+                return "This Google account doesn't have permission to access AdMob data."
+            }
+            return nil
+        case .emptyResponse, .decodingFailed:
+            return nil
+        }
+    }
+
+    static func isUnauthenticatedPublisher(statusCode: Int, body: String) -> Bool {
+        guard statusCode == 401 else { return false }
+        return body.contains("unauthenticated")
+            || body.contains("could not be authenticated")
+            || body.contains("publisher could not be authenticated")
+    }
 }
 
 final class MockAdMobAPIClient: AdMobAPIClient {
@@ -331,34 +365,48 @@ final class MockAdMobAPIClient: AdMobAPIClient {
     }
 
     func fetchReport(accountId: String, range: DateRange, timeZone: String?) async throws -> AdMobReport {
-        let calendar = Calendar.current
-        let rows = (0..<7).map { index in
-            let date = calendar.date(byAdding: .day, value: -index, to: range.endDate) ?? range.endDate
-            let appName = index % 2 == 0 ? "Puzzle Quest" : "Notes Pro"
-            let adUnitName = index % 2 == 0 ? "Banner Home" : "Interstitial Level"
-            let earnings = Double(arc4random_uniform(600)) / 100.0 + 2.0
-            let impressions = 1200 + index * 180
-            let clicks = 30 + index * 4
-            let eCPM = 4.5 + Double(index) * 0.2
-            let adRequests = 1800 + index * 220
-            let matchedRequests = Int(Double(adRequests) * (0.78 - Double(index) * 0.01))
-            let observedECPM = eCPM
-            let metrics = AdMobMetrics(
-                estimatedEarnings: earnings,
-                impressions: impressions,
-                clicks: clicks,
-                eCPM: eCPM,
-                adRequests: adRequests,
-                matchedRequests: matchedRequests,
-                observedECPM: observedECPM
-            )
-            return AdMobReportRow(
-                id: "row-\(index)",
-                date: date,
-                appName: appName,
-                adUnitName: adUnitName,
-                metrics: metrics
-            )
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone.flatMap(TimeZone.init(identifier:)) ?? .current
+        let start = calendar.startOfDay(for: range.startDate)
+        let end = calendar.startOfDay(for: range.endDate)
+        let dayCount = max((calendar.dateComponents([.day], from: start, to: end).day ?? 0) + 1, 1)
+        let placements = [
+            (app: "Crypto Profit Loss Calculator", adUnit: "Banner Home", scale: 1.0),
+            (app: "Notes Pro", adUnit: "Interstitial Level", scale: 0.72),
+            (app: "Focus Timer", adUnit: "Rewarded Bonus", scale: 0.48)
+        ]
+        var generator = SeededMockGenerator(seed: mockSeed(accountId: accountId, range: range, calendar: calendar))
+        var rows: [AdMobReportRow] = []
+
+        for dayOffset in 0..<dayCount {
+            let date = calendar.date(byAdding: .day, value: dayOffset, to: start) ?? start
+            for (placementIndex, placement) in placements.enumerated() {
+                let adRequests = Int(Double(generator.int(in: 1_500...4_800)) * placement.scale)
+                let matchRate = generator.double(in: 0.62...0.94)
+                let matchedRequests = Int(Double(adRequests) * matchRate)
+                let showRate = generator.double(in: 0.48...0.88)
+                let impressions = Int(Double(matchedRequests) * showRate)
+                let ctr = generator.double(in: 0.012...0.075)
+                let clicks = Int(Double(impressions) * ctr)
+                let eCPM = generator.double(in: 1.8...8.5)
+                let earnings = Double(impressions) * eCPM / 1_000
+                let metrics = AdMobMetrics(
+                    estimatedEarnings: earnings,
+                    impressions: impressions,
+                    clicks: clicks,
+                    eCPM: eCPM,
+                    adRequests: adRequests,
+                    matchedRequests: matchedRequests,
+                    observedECPM: eCPM
+                )
+                rows.append(AdMobReportRow(
+                    id: "mock-\(dayOffset)-\(placementIndex)",
+                    date: date,
+                    appName: placement.app,
+                    adUnitName: placement.adUnit,
+                    metrics: metrics
+                ))
+            }
         }
 
         let totals = rows.reduce(AdMobMetrics(estimatedEarnings: 0, impressions: 0, clicks: 0, eCPM: 0, adRequests: 0, matchedRequests: 0, observedECPM: 0)) { partial, row in
@@ -385,12 +433,42 @@ final class MockAdMobAPIClient: AdMobAPIClient {
 
     func fetchCountryReport(accountId: String, range: DateRange, timeZone: String?) async throws -> [AdMobCountrySummary] {
         [
-            AdMobCountrySummary(id: "US", name: "United States", code: "US", earnings: 42.15, impressions: 18250, clicks: 520, eCPM: 2.31),
-            AdMobCountrySummary(id: "GB", name: "United Kingdom", code: "GB", earnings: 18.7, impressions: 7400, clicks: 210, eCPM: 2.53),
-            AdMobCountrySummary(id: "CA", name: "Canada", code: "CA", earnings: 11.9, impressions: 5100, clicks: 140, eCPM: 2.33),
-            AdMobCountrySummary(id: "DE", name: "Germany", code: "DE", earnings: 9.4, impressions: 4200, clicks: 118, eCPM: 2.24),
-            AdMobCountrySummary(id: "AU", name: "Australia", code: "AU", earnings: 7.8, impressions: 3100, clicks: 86, eCPM: 2.52)
+            AdMobCountrySummary(id: "US", name: "United States", code: "US", earnings: 42.15, impressions: 18_250, clicks: 520, adRequests: 28_500, matchedRequests: 23_200, eCPM: 2.31),
+            AdMobCountrySummary(id: "GB", name: "United Kingdom", code: "GB", earnings: 18.70, impressions: 7_400, clicks: 210, adRequests: 11_800, matchedRequests: 9_500, eCPM: 2.53),
+            AdMobCountrySummary(id: "CA", name: "Canada", code: "CA", earnings: 11.90, impressions: 5_100, clicks: 140, adRequests: 8_100, matchedRequests: 6_550, eCPM: 2.33),
+            AdMobCountrySummary(id: "DE", name: "Germany", code: "DE", earnings: 9.40, impressions: 4_200, clicks: 118, adRequests: 6_900, matchedRequests: 5_400, eCPM: 2.24),
+            AdMobCountrySummary(id: "AU", name: "Australia", code: "AU", earnings: 7.80, impressions: 3_100, clicks: 86, adRequests: 5_200, matchedRequests: 4_100, eCPM: 2.52)
         ]
+    }
+
+    private func mockSeed(accountId: String, range: DateRange, calendar: Calendar) -> UInt64 {
+        let start = calendar.dateComponents([.year, .month, .day], from: range.startDate)
+        let end = calendar.dateComponents([.year, .month, .day], from: range.endDate)
+        var seed = UInt64(start.year ?? 0) * 10_000 + UInt64(start.month ?? 0) * 100 + UInt64(start.day ?? 0)
+        seed = seed &* 31 &+ UInt64(end.year ?? 0) * 10_000 + UInt64(end.month ?? 0) * 100 + UInt64(end.day ?? 0)
+        for byte in accountId.utf8 {
+            seed = seed &* 109 &+ UInt64(byte)
+        }
+        return seed
+    }
+
+    func fetchMonthlyEarnings(accountId: String, range: DateRange, timeZone: String?) async throws -> [AdMobMonthlyEarning] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone.flatMap(TimeZone.init(identifier:)) ?? .current
+        let startComponents = calendar.dateComponents([.year, .month], from: range.startDate)
+        let start = calendar.date(from: startComponents) ?? range.startDate
+        let endComponents = calendar.dateComponents([.year, .month], from: range.endDate)
+        let end = calendar.date(from: endComponents) ?? range.endDate
+        let monthCount = max((calendar.dateComponents([.month], from: start, to: end).month ?? 0) + 1, 1)
+        var generator = SeededMockGenerator(seed: mockSeed(accountId: accountId, range: range, calendar: calendar))
+        let baseline = generator.double(in: 480...1_250)
+
+        return (0..<monthCount).compactMap { offset in
+            guard let month = calendar.date(byAdding: .month, value: offset, to: start) else { return nil }
+            let trend = 1 + Double(offset) * generator.double(in: 0.008...0.035)
+            let variation = generator.double(in: 0.78...1.24)
+            return AdMobMonthlyEarning(month: month, estimatedEarnings: baseline * trend * variation)
+        }
     }
 
     func fetchApps(accountId: String) async throws -> [AdMobApp] {
@@ -407,6 +485,29 @@ final class MockAdMobAPIClient: AdMobAPIClient {
             AdMobAdUnit(name: "adUnits/2", adUnitId: "ca-app-pub-xxx/222", appId: "apps/1", displayName: "Interstitial Level", adFormat: "INTERSTITIAL"),
             AdMobAdUnit(name: "adUnits/3", adUnitId: "ca-app-pub-xxx/333", appId: "apps/2", displayName: "Rewarded Bonus", adFormat: "REWARDED")
         ]
+    }
+}
+
+private struct SeededMockGenerator {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        state = seed == 0 ? 0x9E3779B97F4A7C15 : seed
+    }
+
+    mutating func int(in range: ClosedRange<Int>) -> Int {
+        let width = UInt64(range.upperBound - range.lowerBound + 1)
+        return range.lowerBound + Int(next() % width)
+    }
+
+    mutating func double(in range: ClosedRange<Double>) -> Double {
+        let unit = Double(next() >> 11) / Double(1 << 53)
+        return range.lowerBound + unit * (range.upperBound - range.lowerBound)
+    }
+
+    private mutating func next() -> UInt64 {
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        return state
     }
 }
 
@@ -574,6 +675,14 @@ private enum DateParser {
         } else {
             formatter.timeZone = TimeZone.current
         }
+        return formatter.date(from: string)
+    }
+
+    static func month(from string: String, timeZone: String?) -> Date? {
+        guard string.count == 6 else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMM"
+        formatter.timeZone = timeZone.flatMap(TimeZone.init(identifier:)) ?? .current
         return formatter.date(from: string)
     }
 }

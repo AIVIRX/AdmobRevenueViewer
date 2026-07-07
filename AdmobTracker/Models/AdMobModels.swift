@@ -15,6 +15,13 @@ struct AdMobReport: Hashable {
     let totals: AdMobMetrics
 }
 
+struct AdMobMonthlyEarning: Identifiable, Hashable {
+    let month: Date
+    let estimatedEarnings: Double
+
+    var id: Date { month }
+}
+
 struct AdMobReportRow: Identifiable, Hashable {
     let id: String
     let date: Date
@@ -40,6 +47,8 @@ struct AdMobCountrySummary: Identifiable, Hashable {
     let earnings: Double
     let impressions: Int
     let clicks: Int
+    let adRequests: Int
+    let matchedRequests: Int
     let eCPM: Double
 }
 

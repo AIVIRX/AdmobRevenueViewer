@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import WidgetKit
 
 private let summaryAnimation = Animation.easeInOut(duration: 0.25)
 
@@ -8,9 +9,13 @@ struct DashboardView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @StateObject private var viewModel: DashboardViewModel
     @State private var selectedMetric: AppMetric = .earnings
+    @State private var selectedCountryMetric: AppMetric = .earnings
     @State private var selectedAdUnitMetric: AppMetric = .earnings
     @State private var showAllApps = false
+    @State private var showAllCountries = false
     @State private var showAllAdUnits = false
+    @State private var didLoad = false
+    @State private var selectedEarningsPoint: ChartPoint?
 
     init(apiClient: AdMobAPIClient) {
         _viewModel = StateObject(wrappedValue: DashboardViewModel(apiClient: apiClient))
@@ -19,16 +24,13 @@ struct DashboardView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    DateRangePills(selection: $appState.dateRangeOption)
-                        .onChange(of: appState.dateRangeOption) { _, newValue in
-                            appState.dateRange = newValue.range()
-                            Task { await loadReportIfNeeded() }
-                        }
+                VStack(alignment: .leading, spacing: 12) {
                     heroCard
                     metricsGrid
-                    SectionHeader(title: "Apps", subtitle: "Performance by app")
-                    metricPills
+                    HStack{
+                        SectionHeader(title: "Apps", subtitle: "Performance by app")
+                        appMetricMenu
+                    }
                     appsList
                     if appSummaries.count > 5 {
                         ShowMoreRowButton(title: showAllApps ? "Show Less" : "Show More") {
@@ -37,8 +39,22 @@ struct DashboardView: View {
                             }
                         }
                     }
-                    SectionHeader(title: "Ad Units", subtitle: "Performance by ad unit")
-                    adUnitMetricPills
+                    HStack {
+                        SectionHeader(title: "Countries", subtitle: "Performance by country")
+                        countryMetricMenu
+                    }
+                    countriesList
+                    if countrySummaries.count > 5 {
+                        ShowMoreRowButton(title: showAllCountries ? "Show Less" : "Show More") {
+                            withAnimation(.easeInOut) {
+                                showAllCountries.toggle()
+                            }
+                        }
+                    }
+                    HStack{
+                        SectionHeader(title: "Ad Units", subtitle: "Performance by ad unit")
+                        adUnitMetricMenu
+                    }
                     adUnitsList
                     if adUnitSummaries.count > 5 {
                         ShowMoreRowButton(title: showAllAdUnits ? "Show Less" : "Show More") {
@@ -50,13 +66,35 @@ struct DashboardView: View {
                 }
                 .padding(16)
             }
+            .background(Color.appBackground.ignoresSafeArea())
             .refreshable {
-                await loadReportIfNeeded()
+                await loadReportIfNeeded(force: true)
             }
             .navigationTitle("Overview")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Date Range", selection: $appState.dateRangeOption) {
+                            ForEach(DateRangeOption.allCases) { option in
+                                Text(option.rawValue)
+                                    .tag(option)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "line.3.horizontal.decrease")
+                    }
+                    .accessibilityLabel("Date range: \(appState.dateRangeOption.rawValue)")
+                }
+            }
             .task {
+                guard !didLoad else { return }
+                didLoad = true
                 await loadReportIfNeeded()
+            }
+            .onChange(of: appState.dateRangeOption) { _, newValue in
+                appState.dateRange = newValue.range()
+                Task { await loadReportIfNeeded() }
             }
             .onChange(of: appState.selectedAccount) { _, _ in
                 Task { await loadReportIfNeeded() }
@@ -71,72 +109,54 @@ struct DashboardView: View {
 
     private var heroCard: some View {
         let totals = viewModel.report?.totals
-        let heroValue = formatCurrency(totals?.estimatedEarnings)
-        return ZStack(alignment: .bottomLeading) {
-            RoundedRectangle(cornerRadius: 24)
-                .fill(Color(uiColor: .secondarySystemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24)
-                        .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 6)
+        let heroValue = formatCurrency(selectedEarningsPoint?.earnings ?? totals?.estimatedEarnings)
+        return VStack(spacing: 12) {
+            Text("Estimated Earnings")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack{
-                    Text("Estimated earnings")
-                        .font(.subheadline.weight(.semibold))
+            Text(heroValue)
+                .font(.system(size: 46, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+                .contentTransition(.numericText())
+                .animation(summaryAnimation, value: heroValue)
+
+            HStack(spacing: 6) {
+                if let selectedEarningsPoint {
+                    Text(formatShortDate(selectedEarningsPoint.date))
                         .foregroundStyle(.secondary)
-                    
-                    Spacer()
-                
-                    Text(appState.dateRangeOption.rawValue)
-                        .font(.caption)
+                } else if let delta = percentChange(current: totals?.estimatedEarnings, previous: viewModel.previousReport?.totals.estimatedEarnings) {
+                    Image(systemName: delta >= 0 ? "arrow.up" : "arrow.down")
+                    Text(formatDelta(delta))
+                        .contentTransition(.numericText())
+                        .animation(summaryAnimation, value: formatDelta(delta))
+                    Text(comparisonLabel)
                         .foregroundStyle(.secondary)
-                }
-                Text(heroValue)
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
-                    .contentTransition(.numericText())
-                    .animation(summaryAnimation, value: heroValue)
-                HStack(spacing: 6) {
-                    if let delta = percentChange(current: totals?.estimatedEarnings, previous: viewModel.previousReport?.totals.estimatedEarnings) {
-                        Image(systemName: delta >= 0 ? "arrow.up.right" : "arrow.down.right")
-                        Text(formatDelta(delta))
-                            .contentTransition(.numericText())
-                            .animation(summaryAnimation, value: formatDelta(delta))
-                        Text(comparisonLabel)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Image(systemName: "arrow.up.right")
-                            .opacity(0)
-                        Text("--")
-                            .opacity(0)
-                        Text(comparisonLabel)
-                            .foregroundStyle(.secondary)
-                            .opacity(0)
-                    }
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(heroDeltaColor)
-                if shouldShowChart {
-                    if viewModel.isLoading {
-                        ProgressView("Loading chart...")
-                    } else if let data = chartData, !data.isEmpty {
-                        EarningsChartView(
-                            data: data,
-                            domain: chartDomain,
-                            currencyCode: appState.selectedAccount?.currencyCode ?? "USD",
-                            isCompact: true
-                        )
-                    } else {
-                        Text("No chart data available.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
-            .padding(20)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(heroDeltaColor)
+
+            if viewModel.isLoading {
+                ProgressView("Loading chart...")
+                    .frame(height: 170)
+            } else if let data = chartData, !data.isEmpty {
+                EarningsChartView(
+                    data: data,
+                    domain: chartDomain,
+                    currencyCode: appState.selectedAccount?.currencyCode ?? "USD",
+                    isCompact: true,
+                    selectedPoint: $selectedEarningsPoint
+                )
+            } else {
+                Text("No chart data available.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(height: 170)
+            }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 12)
     }
 
     private var metricsGrid: some View {
@@ -144,51 +164,74 @@ struct DashboardView: View {
         let previousTotals = viewModel.previousReport?.totals
         let matchRateValue = matchRate(for: totals)
         let previousMatchRate = matchRate(for: previousTotals)
+        let ctrValue = clickThroughRate(for: totals)
+        let previousCTR = clickThroughRate(for: previousTotals)
+        let dailyTotals = dailyMetricTotals(for: viewModel.report)
+        let previousDailyTotals = dailyMetricTotals(for: viewModel.previousReport)
         return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            MetricTile(
+            MetricSparklineCard(
                 title: "Impressions",
                 value: formatInt(totals?.impressions),
-                subtitle: "Total",
-                systemImage: "eye",
                 delta: percentChange(current: totals?.impressions, previous: previousTotals?.impressions),
-                deltaLabel: comparisonLabel
+                values: sparklineValues(
+                    current: dailyTotals.map { Double($0.impressions) },
+                    previous: previousDailyTotals.map { Double($0.impressions) }
+                )
             )
-            MetricTile(
+
+            MetricSparklineCard(
                 title: "Clicks",
                 value: formatInt(totals?.clicks),
-                subtitle: "Total",
-                systemImage: "cursorarrow.click",
                 delta: percentChange(current: totals?.clicks, previous: previousTotals?.clicks),
-                deltaLabel: comparisonLabel
+                values: sparklineValues(
+                    current: dailyTotals.map { Double($0.clicks) },
+                    previous: previousDailyTotals.map { Double($0.clicks) }
+                )
             )
-            MetricTile(
+
+            MetricSparklineCard(
                 title: "Ad Requests",
                 value: formatInt(totals?.adRequests),
-                subtitle: "Total",
-                systemImage: "antenna.radiowaves.left.and.right",
                 delta: percentChange(current: totals?.adRequests, previous: previousTotals?.adRequests),
-                deltaLabel: comparisonLabel
+                values: sparklineValues(
+                    current: dailyTotals.map { Double($0.adRequests) },
+                    previous: previousDailyTotals.map { Double($0.adRequests) }
+                )
             )
-            MetricTile(
+
+            MetricSparklineCard(
                 title: "Match Rate",
                 value: formatPercent(matchRateValue),
-                subtitle: "Matched / Requests",
-                systemImage: "checkmark.seal",
                 delta: percentChange(current: matchRateValue, previous: previousMatchRate),
-                deltaLabel: comparisonLabel
+                values: sparklineValues(
+                    current: dailyTotals.map { matchRate(for: $0) ?? 0 },
+                    previous: previousDailyTotals.map { matchRate(for: $0) ?? 0 }
+                )
             )
-            MetricTile(
+
+            MetricSparklineCard(
                 title: "Observed eCPM",
                 value: formatCurrency(totals?.observedECPM),
-                subtitle: "Per 1K",
-                systemImage: "speedometer",
                 delta: percentChange(current: totals?.observedECPM, previous: previousTotals?.observedECPM),
-                deltaLabel: comparisonLabel
+                values: sparklineValues(
+                    current: dailyTotals.map(\.observedECPM),
+                    previous: previousDailyTotals.map(\.observedECPM)
+                )
+            )
+
+            MetricSparklineCard(
+                title: "CTR",
+                value: formatPercent(ctrValue),
+                delta: percentChange(current: ctrValue, previous: previousCTR),
+                values: sparklineValues(
+                    current: dailyTotals.map { clickThroughRate(for: $0) ?? 0 },
+                    previous: previousDailyTotals.map { clickThroughRate(for: $0) ?? 0 }
+                )
             )
         }
     }
 
-    private var metricPills: some View {
+    private var appMetricMenu: some View {
         Group {
             if viewModel.isLoading {
                 ProgressView("Loading report...")
@@ -204,20 +247,34 @@ struct DashboardView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 5) {
+                Menu {
+                    Picker("App Metric", selection: $selectedMetric) {
                         ForEach(AppMetric.allCases, id: \.self) { metric in
-                            AppFilterPill(title: metric.title, isSelected: selectedMetric == metric) {
-                                selectedMetric = metric
-                            }
+                            Text(metric.title)
+                                .tag(metric)
                         }
                     }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(selectedMetric.title)
+                            .font(.subheadline.weight(.semibold))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.cardBackground)
+                    )
                 }
+                .accessibilityLabel("App metric: \(selectedMetric.title)")
             }
         }
     }
 
-    private var adUnitMetricPills: some View {
+    private var adUnitMetricMenu: some View {
         Group {
             if viewModel.isLoading {
                 ProgressView("Loading report...")
@@ -233,15 +290,63 @@ struct DashboardView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 5) {
+                Menu {
+                    Picker("Ad Unit Metric", selection: $selectedAdUnitMetric) {
                         ForEach(AppMetric.allCases, id: \.self) { metric in
-                            AppFilterPill(title: metric.title, isSelected: selectedAdUnitMetric == metric) {
-                                selectedAdUnitMetric = metric
-                            }
+                            Text(metric.title)
+                                .tag(metric)
                         }
                     }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(selectedAdUnitMetric.title)
+                            .font(.subheadline.weight(.semibold))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.cardBackground)
+                    )
                 }
+                .accessibilityLabel("Ad unit metric: \(selectedAdUnitMetric.title)")
+            }
+        }
+    }
+
+    private var countryMetricMenu: some View {
+        Group {
+            if viewModel.isLoading {
+                ProgressView()
+            } else if countrySummaries.isEmpty {
+                EmptyView()
+            } else {
+                Menu {
+                    Picker("Country Metric", selection: $selectedCountryMetric) {
+                        ForEach(AppMetric.allCases, id: \.self) { metric in
+                            Text(metric.title)
+                                .tag(metric)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(selectedCountryMetric.title)
+                            .font(.subheadline.weight(.semibold))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.cardBackground)
+                    )
+                }
+                .accessibilityLabel("Country metric: \(selectedCountryMetric.title)")
             }
         }
     }
@@ -294,6 +399,29 @@ struct DashboardView: View {
         }
     }
 
+    private var countriesList: some View {
+        Group {
+            if viewModel.isLoading || viewModel.errorMessage != nil {
+                EmptyView()
+            } else if countrySummaries.isEmpty {
+                Text("No country data for this date range.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 5) {
+                    ForEach(visibleCountrySummaries) { country in
+                        CountryRowCard(
+                            name: country.name,
+                            flag: flagEmoji(for: country.code),
+                            metricLabel: selectedCountryMetric.title,
+                            metricValue: valueForMetric(selectedCountryMetric, country: country)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private var chartSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "Earnings Trend", subtitle: "Last \(appState.dateRangeOption.rawValue)")
@@ -302,7 +430,8 @@ struct DashboardView: View {
                     data: data,
                     domain: chartDomain,
                     currencyCode: appState.selectedAccount?.currencyCode ?? "USD",
-                    isCompact: false
+                    isCompact: false,
+                    selectedPoint: $selectedEarningsPoint
                 )
             } else if viewModel.isLoading {
                 ProgressView("Loading chart...")
@@ -314,17 +443,19 @@ struct DashboardView: View {
         }
     }
 
-    private var shouldShowChart: Bool {
-        switch appState.dateRangeOption {
-        case .today, .yesterday:
-            return false
-        case .last7Days, .thisMonth, .lastMonth:
-            return true
-        }
-    }
-
     private var chartData: [ChartPoint]? {
         guard let report = viewModel.report else { return nil }
+
+        if appState.dateRangeOption == .today || appState.dateRangeOption == .yesterday {
+            guard let previousReport = viewModel.previousReport else {
+                return [ChartPoint(date: report.startDate, earnings: report.totals.estimatedEarnings)]
+            }
+            return [
+                ChartPoint(date: previousReport.startDate, earnings: previousReport.totals.estimatedEarnings),
+                ChartPoint(date: report.startDate, earnings: report.totals.estimatedEarnings)
+            ]
+        }
+
         let calendar = calendarForAccount()
         let start = calendar.startOfDay(for: report.startDate)
         let end = calendar.startOfDay(for: report.endDate)
@@ -340,6 +471,12 @@ struct DashboardView: View {
     }
 
     private var chartDomain: ClosedRange<Date> {
+        if let data = chartData,
+           let firstDate = data.first?.date,
+           let lastDate = data.last?.date,
+           firstDate < lastDate {
+            return firstDate...lastDate
+        }
         let calendar = calendarForAccount()
         let start = calendar.startOfDay(for: appState.dateRange.startDate)
         let end = calendar.startOfDay(for: appState.dateRange.endDate)
@@ -359,65 +496,148 @@ struct DashboardView: View {
     }
 
 
-    private func loadReportIfNeeded() async {
+    private func loadReportIfNeeded(force: Bool = false) async {
         guard let account = appState.selectedAccount else { return }
         let range = appState.dateRange
         let compareRange = appState.dateRangeOption.comparisonRange(for: range)
-        if let prefetched = appState.prefetchedReport,
-           prefetched.accountId == account.id,
-           prefetched.range == range,
-           prefetched.timeZone == account.reportingTimeZone {
-            viewModel.isLoading = true
-            viewModel.errorMessage = nil
-            await viewModel.loadPreviousReport(
+        await viewModel.load(accountId: account.id, range: range, compareRange: compareRange, timeZone: account.reportingTimeZone)
+        await saveWidgetSnapshots(account: account)
+        Task { await viewModel.loadAppMetadata(accountId: account.id, force: force) }
+        Task { await viewModel.loadAdUnitMetadata(accountId: account.id, force: force) }
+    }
+
+    private func saveWidgetSnapshots(account: AdMobAccount) async {
+        let calendar = calendarForAccount()
+        let fallbackReport = viewModel.report
+        let ranges: [(WidgetTimeRange, DateRange)] = [
+            (.today, DateRangeOption.today.range(calendar: calendar)),
+            (.yesterday, DateRangeOption.yesterday.range(calendar: calendar)),
+            (.last7Days, DateRangeOption.last7Days.range(calendar: calendar)),
+            (.thisMonth, DateRangeOption.thisMonth.range(calendar: calendar)),
+            (.lastMonth, DateRangeOption.lastMonth.range(calendar: calendar))
+        ]
+
+        for (rangeType, dateRange) in ranges {
+            let seriesRangeType = (rangeType == .today || rangeType == .yesterday) ? WidgetTimeRange.last7Days : rangeType
+            let seriesDateRange = ranges.first { $0.0 == seriesRangeType }?.1 ?? dateRange
+            let report = await viewModel.fetchWidgetTrendReport(
                 accountId: account.id,
-                range: compareRange,
+                range: dateRange,
                 timeZone: account.reportingTimeZone
             )
-            viewModel.report = prefetched.report
-            viewModel.isLoading = false
-            Task { await viewModel.loadAppMetadata(accountId: account.id) }
-            Task { await viewModel.loadAdUnitMetadata(accountId: account.id) }
-            return
+            let sourceReport = report ?? fallbackReport
+            guard let sourceReport else { continue }
+            let seriesReport: AdMobReport?
+            if seriesRangeType == rangeType {
+                seriesReport = report
+            } else {
+                seriesReport = await viewModel.fetchWidgetTrendReport(
+                    accountId: account.id,
+                    range: seriesDateRange,
+                    timeZone: account.reportingTimeZone
+                )
+            }
+            let values = seriesReport.map {
+                Self.widgetSeriesValues(for: $0, range: seriesDateRange, calendar: calendar)
+            } ?? [sourceReport.totals.estimatedEarnings]
+            WidgetRevenueStore.save(WidgetRevenueSnapshot(
+                amount: sourceReport.totals.estimatedEarnings,
+                currencyCode: account.currencyCode,
+                rangeLabel: Self.dateRangeLabel(for: rangeType),
+                updatedAt: Date(),
+                values: values
+            ), for: rangeType)
         }
-        await viewModel.load(accountId: account.id, range: range, compareRange: compareRange, timeZone: account.reportingTimeZone)
-        Task { await viewModel.loadAppMetadata(accountId: account.id) }
-        Task { await viewModel.loadAdUnitMetadata(accountId: account.id) }
-        if let report = viewModel.report {
-            appState.prefetchedReport = PrefetchedReport(
-                accountId: account.id,
-                range: range,
-                timeZone: account.reportingTimeZone,
-                report: report
-            )
+
+        WidgetCenter.shared.reloadTimelines(ofKind: WidgetRevenueStore.widgetKind)
+    }
+
+    private static func widgetSeriesValues(for report: AdMobReport, range: DateRange, calendar: Calendar) -> [Double] {
+        let groupedRows = Dictionary(grouping: report.rows) { calendar.startOfDay(for: $0.date) }
+        let start = calendar.startOfDay(for: range.startDate)
+        let dayCount = max(calendar.dateComponents([.day], from: start, to: calendar.startOfDay(for: range.endDate)).day ?? 0, 0) + 1
+        return (0..<dayCount).compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
+            return (groupedRows[date] ?? []).reduce(0) { $0 + $1.metrics.estimatedEarnings }
+        }
+    }
+
+    private static func dateRangeLabel(for rangeType: WidgetTimeRange) -> String {
+        switch rangeType {
+        case .today: return "Today"
+        case .yesterday: return "Yesterday"
+        case .last7Days: return "Last 7 Days"
+        case .thisMonth: return "This Month"
+        case .lastMonth: return "Last Month"
         }
     }
 
     private func formatCurrency(_ value: Double?) -> String {
-        guard let value else { return "--" }
+        guard let value else { return "0.00" }
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = appState.selectedAccount?.currencyCode ?? "USD"
-        return formatter.string(from: NSNumber(value: value)) ?? "--"
+        return formatter.string(from: NSNumber(value: value)) ?? "0.00"
     }
 
     private func formatInt(_ value: Int?) -> String {
-        guard let value else { return "--" }
+        guard let value else { return "0.00" }
         return NumberFormatter.localizedString(from: NSNumber(value: value), number: .decimal)
     }
 
     private func formatPercent(_ value: Double?) -> String {
-        guard let value else { return "--" }
+        guard let value else { return "0.00" }
         let formatter = NumberFormatter()
         formatter.numberStyle = .percent
         formatter.maximumFractionDigits = 1
-        return formatter.string(from: NSNumber(value: value)) ?? "--"
+        return formatter.string(from: NSNumber(value: value)) ?? "0.00"
     }
 
     private func matchRate(for totals: AdMobMetrics?) -> Double? {
         guard let totals, totals.adRequests > 0 else { return nil }
         return Double(totals.matchedRequests) / Double(totals.adRequests)
     }
+
+    private func clickThroughRate(for totals: AdMobMetrics?) -> Double? {
+        guard let totals, totals.impressions > 0 else { return nil }
+        return Double(totals.clicks) / Double(totals.impressions)
+    }
+
+    private func sparklineValues(current: [Double], previous: [Double]) -> [Double] {
+        switch appState.dateRangeOption {
+        case .today, .yesterday:
+            return [previous.last, current.last].compactMap { $0 }
+        case .last7Days, .thisMonth, .lastMonth:
+            return current
+        }
+    }
+
+    private func dailyMetricTotals(for report: AdMobReport?) -> [AdMobMetrics] {
+        guard let rows = report?.rows else { return [] }
+        let calendar = Calendar.current
+        let groupedRows = Dictionary(grouping: rows) { calendar.startOfDay(for: $0.date) }
+
+        return groupedRows.keys.sorted().compactMap { date in
+            guard let rows = groupedRows[date] else { return nil }
+            let earnings = rows.reduce(0) { $0 + $1.metrics.estimatedEarnings }
+            let impressions = rows.reduce(0) { $0 + $1.metrics.impressions }
+            let clicks = rows.reduce(0) { $0 + $1.metrics.clicks }
+            let adRequests = rows.reduce(0) { $0 + $1.metrics.adRequests }
+            let matchedRequests = rows.reduce(0) { $0 + $1.metrics.matchedRequests }
+            let eCPM = impressions > 0 ? earnings / Double(impressions) * 1_000 : 0
+
+            return AdMobMetrics(
+                estimatedEarnings: earnings,
+                impressions: impressions,
+                clicks: clicks,
+                eCPM: eCPM,
+                adRequests: adRequests,
+                matchedRequests: matchedRequests,
+                observedECPM: eCPM
+            )
+        }
+    }
+
 
     private var appSummaries: [AppSummary] {
         guard let rows = viewModel.report?.rows else { return [] }
@@ -430,13 +650,16 @@ struct DashboardView: View {
             let matchedRequests = rows.reduce(0) { $0 + $1.metrics.matchedRequests }
             let ecpm = impressions > 0 ? (earnings / Double(impressions) * 1000.0) : 0
             let matchRate = adRequests > 0 ? Double(matchedRequests) / Double(adRequests) : 0
+            let ctr = impressions > 0 ? Double(clicks) / Double(impressions) : 0
             return AppSummary(
                 appName: appName,
                 earnings: earnings,
                 impressions: impressions,
                 clicks: clicks,
+                adRequests: adRequests,
                 eCPM: ecpm,
                 matchRate: matchRate,
+                ctr: ctr,
                 platform: viewModel.appPlatforms[appName],
                 iconURL: viewModel.appIconURLs[appName]
             )
@@ -449,10 +672,14 @@ struct DashboardView: View {
                 return lhs.impressions > rhs.impressions
             case .clicks:
                 return lhs.clicks > rhs.clicks
+            case .adRequests:
+                return lhs.adRequests > rhs.adRequests
             case .ecpm:
                 return lhs.eCPM > rhs.eCPM
             case .matchRate:
                 return lhs.matchRate > rhs.matchRate
+            case .ctr:
+                return lhs.ctr > rhs.ctr
             }
         }
     }
@@ -470,6 +697,7 @@ struct DashboardView: View {
             let matchedRequests = rows.reduce(0) { $0 + $1.metrics.matchedRequests }
             let ecpm = impressions > 0 ? (earnings / Double(impressions) * 1000.0) : 0
             let matchRate = adRequests > 0 ? Double(matchedRequests) / Double(adRequests) : 0
+            let ctr = impressions > 0 ? Double(clicks) / Double(impressions) : 0
             let adFormat = viewModel.adUnitFormats[adUnitName]
             return AdUnitSummary(
                 adUnitName: adUnitName,
@@ -477,8 +705,10 @@ struct DashboardView: View {
                 earnings: earnings,
                 impressions: impressions,
                 clicks: clicks,
+                adRequests: adRequests,
                 eCPM: ecpm,
                 matchRate: matchRate,
+                ctr: ctr,
                 adFormat: adFormat
             )
         }
@@ -491,16 +721,38 @@ struct DashboardView: View {
                 return lhs.impressions > rhs.impressions
             case .clicks:
                 return lhs.clicks > rhs.clicks
+            case .adRequests:
+                return lhs.adRequests > rhs.adRequests
             case .ecpm:
                 return lhs.eCPM > rhs.eCPM
             case .matchRate:
                 return lhs.matchRate > rhs.matchRate
+            case .ctr:
+                return lhs.ctr > rhs.ctr
             }
         }
     }
 
     private var visibleAppSummaries: [AppSummary] {
         showAllApps ? appSummaries : Array(appSummaries.prefix(5))
+    }
+
+    private var countrySummaries: [AdMobCountrySummary] {
+        viewModel.countrySummaries.sorted { lhs, rhs in
+            switch selectedCountryMetric {
+            case .earnings: return lhs.earnings > rhs.earnings
+            case .impressions: return lhs.impressions > rhs.impressions
+            case .clicks: return lhs.clicks > rhs.clicks
+            case .adRequests: return lhs.adRequests > rhs.adRequests
+            case .ecpm: return lhs.eCPM > rhs.eCPM
+            case .matchRate: return countryMatchRate(lhs) > countryMatchRate(rhs)
+            case .ctr: return countryCTR(lhs) > countryCTR(rhs)
+            }
+        }
+    }
+
+    private var visibleCountrySummaries: [AdMobCountrySummary] {
+        showAllCountries ? countrySummaries : Array(countrySummaries.prefix(5))
     }
 
     private var visibleAdUnitSummaries: [AdUnitSummary] {
@@ -515,10 +767,14 @@ struct DashboardView: View {
             return formatInt(summary.impressions)
         case .clicks:
             return formatInt(summary.clicks)
+        case .adRequests:
+            return formatInt(summary.adRequests)
         case .ecpm:
             return formatCurrency(summary.eCPM)
         case .matchRate:
             return formatPercent(summary.matchRate)
+        case .ctr:
+            return formatPercent(summary.ctr)
         }
     }
 
@@ -530,11 +786,46 @@ struct DashboardView: View {
             return formatInt(summary.impressions)
         case .clicks:
             return formatInt(summary.clicks)
+        case .adRequests:
+            return formatInt(summary.adRequests)
         case .ecpm:
             return formatCurrency(summary.eCPM)
         case .matchRate:
             return formatPercent(summary.matchRate)
+        case .ctr:
+            return formatPercent(summary.ctr)
         }
+    }
+
+    private func valueForMetric(_ metric: AppMetric, country: AdMobCountrySummary) -> String {
+        switch metric {
+        case .earnings: return formatCurrency(country.earnings)
+        case .impressions: return formatInt(country.impressions)
+        case .clicks: return formatInt(country.clicks)
+        case .adRequests: return formatInt(country.adRequests)
+        case .ecpm: return formatCurrency(country.eCPM)
+        case .matchRate: return formatPercent(countryMatchRate(country))
+        case .ctr: return formatPercent(countryCTR(country))
+        }
+    }
+
+    private func countryMatchRate(_ country: AdMobCountrySummary) -> Double {
+        guard country.adRequests > 0 else { return 0 }
+        return Double(country.matchedRequests) / Double(country.adRequests)
+    }
+
+    private func countryCTR(_ country: AdMobCountrySummary) -> Double {
+        guard country.impressions > 0 else { return 0 }
+        return Double(country.clicks) / Double(country.impressions)
+    }
+
+    private func flagEmoji(for countryCode: String?) -> String? {
+        guard let countryCode, countryCode.count == 2 else { return nil }
+        let scalars = countryCode.uppercased().unicodeScalars.compactMap {
+            UnicodeScalar(127397 + $0.value)
+        }
+        guard scalars.count == 2 else { return nil }
+        return String(String.UnicodeScalarView(scalars))
     }
 
     private func percentChange(current: Int?, previous: Int?) -> Double? {
@@ -552,7 +843,7 @@ struct DashboardView: View {
         formatter.numberStyle = .percent
         formatter.maximumFractionDigits = 1
         formatter.positivePrefix = "+"
-        return formatter.string(from: NSNumber(value: value)) ?? "--"
+        return formatter.string(from: NSNumber(value: value)) ?? "0.00"
     }
 
     private var heroDeltaColor: Color {
@@ -566,6 +857,7 @@ struct DashboardView: View {
     private func formatShortDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d"
+        formatter.timeZone = calendarForAccount().timeZone
         return formatter.string(from: date)
     }
 
@@ -594,8 +886,7 @@ private struct EarningsChartView: View {
     let domain: ClosedRange<Date>
     let currencyCode: String
     let isCompact: Bool
-
-    @State private var selectedPoint: ChartPoint?
+    @Binding var selectedPoint: ChartPoint?
 
     var body: some View {
         Chart(data) { point in
@@ -605,13 +896,16 @@ private struct EarningsChartView: View {
             )
             .interpolationMethod(.catmullRom)
             .foregroundStyle(Color.accentColor)
+            .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
 
-            PointMark(
-                x: .value("Date", point.date),
-                y: .value("Earnings", point.earnings)
-            )
-            .symbolSize(22)
-            .foregroundStyle(Color.accentColor.opacity(0.85))
+            if !isCompact || data.count == 1 {
+                PointMark(
+                    x: .value("Date", point.date),
+                    y: .value("Earnings", point.earnings)
+                )
+                .symbolSize(22)
+                .foregroundStyle(Color.accentColor.opacity(0.85))
+            }
 
             AreaMark(
                 x: .value("Date", point.date),
@@ -620,7 +914,7 @@ private struct EarningsChartView: View {
             .interpolationMethod(.catmullRom)
             .foregroundStyle(
                 LinearGradient(
-                    colors: [Color.accentColor.opacity(0.35), Color.accentColor.opacity(0.02)],
+                    colors: [Color.accentColor.opacity(0.1), Color.accentColor.opacity(0.05), Color.accentColor.opacity(0.0)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -629,7 +923,7 @@ private struct EarningsChartView: View {
             if let selectedPoint, selectedPoint.date == point.date {
                 RuleMark(x: .value("Selected", selectedPoint.date))
                     .foregroundStyle(Color.primary.opacity(0.2))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4]))
+                    .lineStyle(StrokeStyle(lineWidth: 2.5, dash: [4]))
                     .annotation(position: .top, alignment: tooltipAlignment(for: selectedPoint.date)) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(formatShortDate(selectedPoint.date))
@@ -641,7 +935,7 @@ private struct EarningsChartView: View {
                         .padding(8)
                         .background(
                             RoundedRectangle(cornerRadius: 10)
-                                .fill(Color(uiColor: .secondarySystemBackground))
+                                .fill(Color.cardBackground)
                                 .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
                         )
                     }
@@ -649,14 +943,15 @@ private struct EarningsChartView: View {
         }
         .chartXScale(domain: domain)
         .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
         .chartYScale(domain: 0...max(1, data.map { $0.earnings }.max() ?? 1))
-        .frame(height: isCompact ? 120 : 200)
+        .frame(height: isCompact ? 170 : 200)
         .padding(isCompact ? 0 : 12)
         .background(
             Group {
                 if !isCompact {
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(Color(uiColor: .secondarySystemBackground))
+                        .fill(Color.cardBackground)
                 }
             }
         )
@@ -669,20 +964,12 @@ private struct EarningsChartView: View {
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
                                 guard let plotFrame = proxy.plotFrame else { return }
-                                let origin = geometry[plotFrame].origin
-                                let location = CGPoint(
-                                    x: value.location.x - origin.x,
-                                    y: value.location.y - origin.y
-                                )
+                                let frame = geometry[plotFrame]
+                                let plotX = min(max(value.location.x - frame.origin.x, 0), frame.width)
+                                let location = CGPoint(x: plotX, y: value.location.y - frame.origin.y)
                                 if let date: Date = proxy.value(atX: location.x),
-                                   let nearest = nearestPoint(to: date),
-                                   let snappedX = proxy.position(forX: nearest.date) {
-                                    let dx = abs(snappedX - location.x)
-                                    if dx < 18 {
-                                        selectedPoint = nearest
-                                    } else {
-                                        selectedPoint = nil
-                                    }
+                                   let nearest = nearestPoint(to: date) {
+                                    selectedPoint = nearest
                                 }
                             }
                             .onEnded { _ in
@@ -715,7 +1002,7 @@ private struct EarningsChartView: View {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = currencyCode
-        return formatter.string(from: NSNumber(value: value)) ?? "--"
+        return formatter.string(from: NSNumber(value: value)) ?? "0.00"
     }
 
     private func formatShortDate(_ date: Date) -> String {
@@ -725,78 +1012,16 @@ private struct EarningsChartView: View {
     }
 }
 
-private struct MetricTile: View {
-    let title: String
-    let value: String
-    let subtitle: String
-    let systemImage: String
-    let delta: Double?
-    let deltaLabel: String
-
-    var body: some View {
-        let deltaValue = delta.map(formatDelta) ?? "--"
-        let hasDelta = delta != nil
-        let deltaColor = hasDelta ? ((delta ?? 0) >= 0 ? Color.green : Color.red) : Color.secondary
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tint)
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            Text(value)
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
-                .contentTransition(.numericText())
-                .animation(summaryAnimation, value: value)
-            Text(subtitle)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-                Image(systemName: (delta ?? 0) >= 0 ? "arrow.up.right" : "arrow.down.right")
-                    .opacity(hasDelta ? 1 : 0)
-                Text(deltaValue)
-                    .monospacedDigit()
-                    .frame(width: 56, alignment: .leading)
-                    .contentTransition(.numericText())
-                    .animation(summaryAnimation, value: deltaValue)
-                Text(deltaLabel)
-                    .foregroundStyle(.secondary)
-            }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(deltaColor)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(uiColor: .secondarySystemBackground))
-                .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 3)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1)
-                )
-        )
-    }
-
-    private func formatDelta(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .percent
-        formatter.maximumFractionDigits = 1
-        formatter.positivePrefix = "+"
-        return formatter.string(from: NSNumber(value: value)) ?? "--"
-    }
-}
-
 private struct AppSummary: Identifiable {
     let id = UUID()
     let appName: String
     let earnings: Double
     let impressions: Int
     let clicks: Int
+    let adRequests: Int
     let eCPM: Double
     let matchRate: Double
+    let ctr: Double
     let platform: String?
     let iconURL: URL?
 }
@@ -808,31 +1033,11 @@ private struct AdUnitSummary: Identifiable {
     let earnings: Double
     let impressions: Int
     let clicks: Int
+    let adRequests: Int
     let eCPM: Double
     let matchRate: Double
+    let ctr: Double
     let adFormat: String?
-}
-
-private struct AppFilterPill: View {
-    let title: String
-    let isSelected: Bool
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(
-                    Capsule()
-                        .fill(isSelected ? Color.accentColor : Color(uiColor: .secondarySystemBackground))
-                )
-                .foregroundStyle(isSelected ? Color.white : Color.primary)
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 private struct ShowMoreRowButton: View {
@@ -851,7 +1056,7 @@ private struct ShowMoreRowButton: View {
             .frame(maxWidth: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(Color(uiColor: .secondarySystemBackground))
+                    .fill(Color.cardBackground)
             )
         }
         .buttonStyle(.plain)
@@ -893,7 +1098,7 @@ private struct AppRowCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(uiColor: .secondarySystemBackground))
+                .fill(Color.cardBackground)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
                         .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1)
@@ -907,6 +1112,50 @@ private struct AppRowCard: View {
         case "ANDROID": return "Android"
         default: return platform
         }
+    }
+}
+
+private struct CountryRowCard: View {
+    let name: String
+    let flag: String?
+    let metricLabel: String
+    let metricValue: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.12))
+                Text(flag ?? "--")
+                    .font(.title3)
+            }
+            .frame(width: 44, height: 44)
+
+            Text(name)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(metricValue)
+                    .font(.subheadline.weight(.semibold))
+                    .contentTransition(.numericText())
+                Text(metricLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1)
+                )
+        )
     }
 }
 
@@ -944,74 +1193,12 @@ private struct AdUnitRowCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(uiColor: .secondarySystemBackground))
+                .fill(Color.cardBackground)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
                         .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1)
                 )
         )
-    }
-}
-
-private struct AdUnitIconView: View {
-    let adFormat: String?
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(uiColor: .secondarySystemBackground))
-            if let assetName {
-                Image(assetName)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(8)
-            } else {
-                Image(systemName: iconName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-            }
-        }
-        .frame(width: 44, height: 44)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 1)
-        )
-    }
-
-    private var assetName: String? {
-        switch adFormat?.uppercased() {
-        case "BANNER":
-            return "banner"
-        case "INTERSTITIAL":
-            return "interstitial"
-        case "REWARDED":
-            return "rewarded"
-        case "REWARDED_INTERSTITIAL":
-            return "rewardedinterstitial"
-        case "NATIVE":
-            return "nativeAdvanced"
-        case "APP_OPEN":
-            return "appopen"
-        default:
-            return nil
-        }
-    }
-
-    private var iconName: String {
-        switch adFormat?.uppercased() {
-        case "BANNER":
-            return "rectangle"
-        case "INTERSTITIAL":
-            return "rectangle.stack"
-        case "REWARDED":
-            return "gift"
-        case "REWARDED_INTERSTITIAL":
-            return "giftcard"
-        case "NATIVE":
-            return "square.text.square"
-        default:
-            return "megaphone"
-        }
     }
 }
 
@@ -1070,16 +1257,20 @@ private enum AppMetric: CaseIterable {
     case earnings
     case impressions
     case clicks
+    case adRequests
     case ecpm
     case matchRate
+    case ctr
 
     var title: String {
         switch self {
         case .earnings: return "Earnings"
         case .impressions: return "Impressions"
         case .clicks: return "Clicks"
+        case .adRequests: return "Ad Requests"
         case .ecpm: return "eCPM"
         case .matchRate: return "Match Rate"
+        case .ctr: return "CTR"
         }
     }
 }

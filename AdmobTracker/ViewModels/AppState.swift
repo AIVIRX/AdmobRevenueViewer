@@ -7,7 +7,7 @@ final class AppState: ObservableObject {
     @Published var selectedAccount: AdMobAccount?
     @Published var dateRange: DateRange
     @Published var dateRangeOption: DateRangeOption
-    @Published var prefetchedReport: PrefetchedReport?
+    @Published var isGuest = false
 
     init(dateRange: DateRange? = nil, dateRangeOption: DateRangeOption = .today) {
         self.dateRangeOption = dateRangeOption
@@ -17,13 +17,6 @@ final class AppState: ObservableObject {
     var isSignedIn: Bool {
         user != nil
     }
-}
-
-struct PrefetchedReport: Hashable {
-    let accountId: String
-    let range: DateRange
-    let timeZone: String?
-    let report: AdMobReport
 }
 
 enum DateRangeOption: String, CaseIterable, Identifiable {

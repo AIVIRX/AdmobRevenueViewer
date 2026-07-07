@@ -13,5 +13,5 @@ struct ContentView: View {
             authManager: AuthManager(),
             apiClient: MockAdMobAPIClient(),
             adSenseClient: MockAdSenseAPIClient()
-        ))
+        )) 
 }

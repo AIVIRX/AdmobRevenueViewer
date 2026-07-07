@@ -42,6 +42,8 @@ struct AccountsView: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.appBackground)
             .navigationTitle("Accounts")
             .task {
                 await viewModel.load()

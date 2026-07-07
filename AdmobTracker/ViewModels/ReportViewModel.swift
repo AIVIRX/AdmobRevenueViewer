@@ -19,7 +19,7 @@ final class ReportViewModel: ObservableObject {
         do {
             report = try await apiClient.fetchReport(accountId: accountId, range: range, timeZone: timeZone)
         } catch {
-            errorMessage = "Unable to load report: \(error.localizedDescription)"
+            errorMessage = "Unable to load report: \(ErrorMessageFormatter.message(for: error))"
         }
         isLoading = false
     }

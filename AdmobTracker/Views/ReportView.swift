@@ -9,6 +9,7 @@ struct ReportView: View {
     @State private var unpaidAmount: String?
     @State private var lastPaymentAmount: String?
     @State private var lastPaymentDate: Date?
+    @State private var didLoad = false
 
     init(apiClient: AdMobAPIClient) {
         _accountsViewModel = StateObject(wrappedValue: AccountsViewModel(apiClient: apiClient))
@@ -78,12 +79,12 @@ struct ReportView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         LabeledContent("Unpaid") {
-                            Text(unpaidAmount ?? "--")
+                            Text(unpaidAmount ?? "0.00")
                                 .fontWeight(.semibold)
                         }
                         LabeledContent("Last Payment") {
                             VStack(alignment: .trailing, spacing: 2) {
-                                Text(lastPaymentAmount ?? "--")
+                                Text(lastPaymentAmount ?? "0.00")
                                     .fontWeight(.semibold)
                                 if let lastPaymentDate {
                                     Text(formatDate(lastPaymentDate))
@@ -91,6 +92,27 @@ struct ReportView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
+                        }
+                    }
+                }
+
+                Section("Legal") {
+                    Link(destination: URL(string: "https://www.aivirx.com/ad-earnings/privacy-policy")!) {
+                        LabeledContent("Privacy Policy") {
+                            Image(systemName: "arrow.up.right")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Link(destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!) {
+                        LabeledContent("Terms of Service") {
+                            Image(systemName: "arrow.up.right")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Link(destination: URL(string: "https://www.aivirx.com/contact")!) {
+                        LabeledContent("Contact") {
+                            Image(systemName: "arrow.up.right")
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -103,12 +125,26 @@ struct ReportView: View {
                         }
                     }
 
+                    if appState.isGuest {
+                        Button {
+                            environment.useLiveClients()
+                            appState.isGuest = false
+                            appState.user = nil
+                            appState.selectedAccount = nil
+                        } label: {
+                            LabeledContent("Sign in with Google") {
+                                Image(systemName: "person.crop.circle.badge.checkmark")
+                                    .foregroundStyle(.tint)
+                            }
+                        }
+                    }
+
                     Button(role: .destructive) {
                         Task {
                             await environment.authManager.signOut()
                             appState.user = nil
                             appState.selectedAccount = nil
-                            appState.prefetchedReport = nil
+                            appState.isGuest = false
                         }
                     } label: {
                         LabeledContent("Sign Out") {
@@ -120,19 +156,25 @@ struct ReportView: View {
 
 
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.appBackground)
             .navigationTitle("Account")
             .listStyle(.insetGrouped)
             .refreshable {
                 await loadPayments()
                 await accountsViewModel.load()
             }
-            .task(id: appState.selectedAccount?.id) {
+            .task {
+                guard !didLoad else { return }
+                didLoad = true
                 await accountsViewModel.load()
                 if appState.selectedAccount == nil {
                     appState.selectedAccount = accountsViewModel.accounts.first
-                    return
                 }
                 await loadPayments()
+            }
+            .onChange(of: appState.selectedAccount) { _, _ in
+                Task { await loadPayments() }
             }
         }
     }
@@ -183,7 +225,7 @@ struct ReportView: View {
         do {
             let accounts = try await environment.adSenseClient.fetchAccounts()
             guard let account = accounts.first else {
-                paymentsError = "No AdSense account found."
+                paymentsError = "No AdSense account found for this Google user."
                 isLoadingPayments = false
                 return
             }
@@ -203,7 +245,13 @@ struct ReportView: View {
                 lastPaymentAmount = nil
             }
         } catch {
-            paymentsError = "Payments unavailable: \(error.localizedDescription)"
+            if let apiError = error as? AdSenseAPIError,
+               case let .httpError(statusCode, body) = apiError,
+               AdSenseAPIError.isUnauthenticated(statusCode: statusCode, body: body.lowercased()) {
+                paymentsError = "No AdSense account found for this Google user."
+            } else {
+                paymentsError = "Payments unavailable: \(ErrorMessageFormatter.message(for: error))"
+            }
         }
         isLoadingPayments = false
     }
