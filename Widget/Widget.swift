@@ -31,9 +31,19 @@ struct RevenueProvider: AppIntentTimelineProvider {
     }
 
     func timeline(for configuration: RevenueWidgetConfigurationIntent, in context: Context) async -> Timeline<RevenueEntry> {
+        var snapshot = WidgetRevenueStore.load(for: configuration.timeRange)
+        if let refreshConfiguration = WidgetRevenueStore.loadRefreshConfiguration(),
+           let refreshedSnapshot = try? await WidgetAdMobClient.fetchSnapshot(
+               configuration: refreshConfiguration,
+               range: configuration.timeRange
+           ) {
+            WidgetRevenueStore.save(refreshedSnapshot, for: configuration.timeRange)
+            snapshot = refreshedSnapshot
+        }
+
         let entry = RevenueEntry(
             date: .now,
-            snapshot: WidgetRevenueStore.load(for: configuration.timeRange),
+            snapshot: snapshot,
             timeRange: configuration.timeRange
         )
         let nextRefresh = Calendar.current.date(byAdding: .minute, value: 30, to: .now) ?? .now.addingTimeInterval(1_800)

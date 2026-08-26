@@ -9,6 +9,12 @@ struct WidgetRevenueSnapshot: Codable, Hashable {
     let values: [Double]
 }
 
+struct WidgetRefreshConfiguration: Codable, Hashable {
+    let accountId: String
+    let currencyCode: String
+    let reportingTimeZone: String?
+}
+
 enum WidgetTimeRange: String, CaseIterable, Codable, Hashable, AppEnum {
     case today
     case yesterday
@@ -34,6 +40,7 @@ enum WidgetTimeRange: String, CaseIterable, Codable, Hashable, AppEnum {
 enum WidgetRevenueStore {
     static let widgetKind = "RevenueWidget"
     private static let appGroupId = "group.com.Maicol.AdmobTracker"
+    private static let refreshConfigurationKey = "widgetRefreshConfiguration"
     private static func snapshotKey(for range: WidgetTimeRange) -> String {
         "latestRevenueSnapshot.\(range.rawValue)"
     }
@@ -46,6 +53,23 @@ enum WidgetRevenueStore {
     static func load(for range: WidgetTimeRange) -> WidgetRevenueSnapshot? {
         guard let data = defaults.data(forKey: snapshotKey(for: range)) else { return nil }
         return try? JSONDecoder().decode(WidgetRevenueSnapshot.self, from: data)
+    }
+
+    static func saveRefreshConfiguration(_ configuration: WidgetRefreshConfiguration) {
+        guard let data = try? JSONEncoder().encode(configuration) else { return }
+        defaults.set(data, forKey: refreshConfigurationKey)
+    }
+
+    static func loadRefreshConfiguration() -> WidgetRefreshConfiguration? {
+        guard let data = defaults.data(forKey: refreshConfigurationKey) else { return nil }
+        return try? JSONDecoder().decode(WidgetRefreshConfiguration.self, from: data)
+    }
+
+    static func clearAll() {
+        defaults.removeObject(forKey: refreshConfigurationKey)
+        for range in WidgetTimeRange.allCases {
+            defaults.removeObject(forKey: snapshotKey(for: range))
+        }
     }
 
     private static var defaults: UserDefaults {

@@ -39,6 +39,9 @@ final class AuthManager: AuthManaging {
                 continuation.resume(returning: user)
             }
         } ?? GIDSignIn.sharedInstance.currentUser
+        if let googleUser {
+            try? SharedGoogleCredentialStore.save(googleUser)
+        }
     }
 
     func signIn() async throws -> AuthUserProfile {
@@ -49,6 +52,7 @@ final class AuthManager: AuthManaging {
 
         let user = try await signIn(with: presenter)
         googleUser = user
+        try? SharedGoogleCredentialStore.save(user)
         guard let profile = currentUser else {
             throw AuthManagerError.missingProfile
         }
@@ -57,6 +61,7 @@ final class AuthManager: AuthManaging {
 
     func signOut() async {
         GIDSignIn.sharedInstance.signOut()
+        SharedGoogleCredentialStore.remove()
         googleUser = nil
     }
 
@@ -68,6 +73,7 @@ final class AuthManager: AuthManaging {
 
         let refreshedUser = try await refreshTokensIfNeeded(for: user)
         googleUser = refreshedUser
+        try? SharedGoogleCredentialStore.save(refreshedUser)
 
         let token = refreshedUser.accessToken.tokenString
         if token.isEmpty {

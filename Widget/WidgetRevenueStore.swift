@@ -9,6 +9,12 @@ struct WidgetRevenueSnapshot: Codable, Hashable {
     let values: [Double]
 }
 
+struct WidgetRefreshConfiguration: Codable, Hashable {
+    let accountId: String
+    let currencyCode: String
+    let reportingTimeZone: String?
+}
+
 enum WidgetTimeRange: String, CaseIterable, Codable, Hashable, AppEnum {
     case today
     case yesterday
@@ -34,6 +40,7 @@ enum WidgetTimeRange: String, CaseIterable, Codable, Hashable, AppEnum {
 enum WidgetRevenueStore {
     static let widgetKind = "RevenueWidget"
     private static let appGroupId = "group.com.Maicol.AdmobTracker"
+    private static let refreshConfigurationKey = "widgetRefreshConfiguration"
     private static func snapshotKey(for range: WidgetTimeRange) -> String {
         "latestRevenueSnapshot.\(range.rawValue)"
     }
@@ -43,7 +50,29 @@ enum WidgetRevenueStore {
         return try? JSONDecoder().decode(WidgetRevenueSnapshot.self, from: data)
     }
 
+    static func save(_ snapshot: WidgetRevenueSnapshot, for range: WidgetTimeRange) {
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        defaults.set(data, forKey: snapshotKey(for: range))
+    }
+
+    static func loadRefreshConfiguration() -> WidgetRefreshConfiguration? {
+        guard let data = defaults.data(forKey: refreshConfigurationKey) else { return nil }
+        return try? JSONDecoder().decode(WidgetRefreshConfiguration.self, from: data)
+    }
+
     private static var defaults: UserDefaults {
         UserDefaults(suiteName: appGroupId) ?? .standard
+    }
+}
+
+extension WidgetTimeRange {
+    var label: String {
+        switch self {
+        case .today: "Today"
+        case .yesterday: "Yesterday"
+        case .last7Days: "Last 7 Days"
+        case .thisMonth: "This Month"
+        case .lastMonth: "Last Month"
+        }
     }
 }

@@ -507,68 +507,11 @@ struct DashboardView: View {
     }
 
     private func saveWidgetSnapshots(account: AdMobAccount) async {
-        let calendar = calendarForAccount()
-        let fallbackReport = viewModel.report
-        let ranges: [(WidgetTimeRange, DateRange)] = [
-            (.today, DateRangeOption.today.range(calendar: calendar)),
-            (.yesterday, DateRangeOption.yesterday.range(calendar: calendar)),
-            (.last7Days, DateRangeOption.last7Days.range(calendar: calendar)),
-            (.thisMonth, DateRangeOption.thisMonth.range(calendar: calendar)),
-            (.lastMonth, DateRangeOption.lastMonth.range(calendar: calendar))
-        ]
-
-        for (rangeType, dateRange) in ranges {
-            let seriesRangeType = (rangeType == .today || rangeType == .yesterday) ? WidgetTimeRange.last7Days : rangeType
-            let seriesDateRange = ranges.first { $0.0 == seriesRangeType }?.1 ?? dateRange
-            let report = await viewModel.fetchWidgetTrendReport(
-                accountId: account.id,
-                range: dateRange,
-                timeZone: account.reportingTimeZone
-            )
-            let sourceReport = report ?? fallbackReport
-            guard let sourceReport else { continue }
-            let seriesReport: AdMobReport?
-            if seriesRangeType == rangeType {
-                seriesReport = report
-            } else {
-                seriesReport = await viewModel.fetchWidgetTrendReport(
-                    accountId: account.id,
-                    range: seriesDateRange,
-                    timeZone: account.reportingTimeZone
-                )
-            }
-            let values = seriesReport.map {
-                Self.widgetSeriesValues(for: $0, range: seriesDateRange, calendar: calendar)
-            } ?? [sourceReport.totals.estimatedEarnings]
-            WidgetRevenueStore.save(WidgetRevenueSnapshot(
-                amount: sourceReport.totals.estimatedEarnings,
-                currencyCode: account.currencyCode,
-                rangeLabel: Self.dateRangeLabel(for: rangeType),
-                updatedAt: Date(),
-                values: values
-            ), for: rangeType)
-        }
-
-        WidgetCenter.shared.reloadTimelines(ofKind: WidgetRevenueStore.widgetKind)
-    }
-
-    private static func widgetSeriesValues(for report: AdMobReport, range: DateRange, calendar: Calendar) -> [Double] {
-        let groupedRows = Dictionary(grouping: report.rows) { calendar.startOfDay(for: $0.date) }
-        let start = calendar.startOfDay(for: range.startDate)
-        let dayCount = max(calendar.dateComponents([.day], from: start, to: calendar.startOfDay(for: range.endDate)).day ?? 0, 0) + 1
-        return (0..<dayCount).compactMap { offset in
-            guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
-            return (groupedRows[date] ?? []).reduce(0) { $0 + $1.metrics.estimatedEarnings }
-        }
-    }
-
-    private static func dateRangeLabel(for rangeType: WidgetTimeRange) -> String {
-        switch rangeType {
-        case .today: return "Today"
-        case .yesterday: return "Yesterday"
-        case .last7Days: return "Last 7 Days"
-        case .thisMonth: return "This Month"
-        case .lastMonth: return "Last Month"
+        if appState.isGuest {
+            WidgetBackgroundRefreshCoordinator.disable()
+        } else {
+            _ = await WidgetSnapshotRefresher.refresh(account: account, apiClient: environment.apiClient)
+            WidgetBackgroundRefreshCoordinator.schedule()
         }
     }
 

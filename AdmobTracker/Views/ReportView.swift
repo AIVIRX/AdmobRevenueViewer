@@ -142,6 +142,7 @@ struct ReportView: View {
                     Button(role: .destructive) {
                         Task {
                             await environment.authManager.signOut()
+                            WidgetBackgroundRefreshCoordinator.disable()
                             appState.user = nil
                             appState.selectedAccount = nil
                             appState.isGuest = false

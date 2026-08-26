@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.Maicol.AdmobTracker.widget-refresh</string>
+	</array>
 	<key>GIDClientID</key>
 	<string>834536675534-522pqkslqkhe1cqr3dd5m034rh85rsmh.apps.googleusercontent.com</string>
 	<key>CFBundleURLTypes</key>
@@ -14,6 +18,10 @@
 				<string>com.googleusercontent.apps.834536675534-522pqkslqkhe1cqr3dd5m034rh85rsmh</string>
 			</array>
 		</dict>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
 	</array>
 </dict>
 </plist>
