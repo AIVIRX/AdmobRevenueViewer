@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Xcode user data and build products
+DerivedData/
+build/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+xcuserdata/
+**/xcuserdata/
+*.moved-aside
+*.xccheckout
+
+# App-specific local configuration
+AdmobTracker/GoogleService-Info.plist
