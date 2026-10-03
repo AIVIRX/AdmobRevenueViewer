@@ -21,16 +21,6 @@ Built with SwiftUI, the app pairs Google Sign-In with the AdMob and AdSense APIs
 - AdMob API and AdSense API
 - Swift Package Manager
 
-## Getting started
-
-1. Clone the repository and open `AdmobTracker.xcodeproj` in Xcode.
-2. Select the `AdmobTracker` scheme and allow Swift Package Manager to resolve dependencies.
-3. Copy `AdmobTracker/GoogleService-Info.example.plist` to `AdmobTracker/GoogleService-Info.plist`.
-4. Replace the placeholder values with your Firebase / Google OAuth configuration.
-5. Build and run on an iOS simulator or device.
-
-> `GoogleService-Info.plist` is intentionally excluded from version control because it contains project-specific configuration. Restrict any deployed Google API keys to the app's bundle identifier.
-
 ## Project structure
 
 ```
